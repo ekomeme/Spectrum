@@ -13,12 +13,16 @@ final class TransportClock {
     private let rate: UnsafeMutablePointer<Float64>
     /// Diagnostics: [v3 transport, v3 musical, v2 transport, v2 beatTempo, v2 timeLocation]
     private let calls: UnsafeMutablePointer<UInt32>
+    /// Number of upcoming transport queries that should report "state changed" (set on play/stop).
+    private let changedPending: UnsafeMutablePointer<Int32>
 
     var callCounts: [UInt32] { (0..<5).map { calls[$0] } }
 
     init() {
         calls = .allocate(capacity: 5)
         calls.initialize(repeating: 0, count: 5)
+        changedPending = .allocate(capacity: 1)
+        changedPending.initialize(to: 0)
         position = .allocate(capacity: 1)
         position.initialize(to: 0)
         playingFlag = .allocate(capacity: 1)
@@ -32,6 +36,7 @@ final class TransportClock {
         playingFlag.deallocate()
         rate.deallocate()
         calls.deallocate()
+        changedPending.deallocate()
     }
 
     var sampleRate: Float64 {
@@ -41,12 +46,23 @@ final class TransportClock {
 
     var isPlaying: Bool {
         get { playingFlag.pointee != 0 }
-        set { playingFlag.pointee = newValue ? 1 : 0 }
+        set {
+            let changed = (playingFlag.pointee != 0) != newValue
+            playingFlag.pointee = newValue ? 1 : 0
+            if changed { changedPending.pointee = 16 }
+        }
     }
 
+    /// The position only ever moves forward while the app is open. Resetting it on every engine restart made
+    /// analysers (MetricAB) see time jump backwards and discard everything that followed.
     var samplePosition: Int64 { position.pointee }
 
-    func reset() { position.pointee = 0 }
+    /// Realtime side: true for the first few queries after a play/stop transition.
+    private func consumeChanged() -> Bool {
+        guard changedPending.pointee > 0 else { return false }
+        changedPending.pointee -= 1
+        return true
+    }
 
     /// Called from the realtime thread after each rendered block.
     func advance(by frames: Int) { position.pointee &+= Int64(frames) }
@@ -65,7 +81,9 @@ final class TransportClock {
     private func installV3Blocks(on au: AUAudioUnit) {
         au.transportStateBlock = { [self] flags, currentSamplePosition, cycleStart, cycleEnd in
             calls[0] &+= 1
-            flags?.pointee = isPlaying ? [.moving] : []
+            var state: AUHostTransportStateFlags = isPlaying ? [.moving] : []
+            if consumeChanged() { state.insert(.changed) }
+            flags?.pointee = state
             currentSamplePosition?.pointee = Float64(position.pointee)
             cycleStart?.pointee = 0
             cycleEnd?.pointee = 0
@@ -113,7 +131,7 @@ final class TransportClock {
                 let clock = Unmanaged<TransportClock>.fromOpaque(userData).takeUnretainedValue()
                 clock.calls[2] &+= 1
                 outIsPlaying?.pointee = DarwinBoolean(clock.isPlaying)
-                outChanged?.pointee = false
+                outChanged?.pointee = DarwinBoolean(clock.consumeChanged())
                 outSample?.pointee = Float64(clock.position.pointee)
                 outIsCycling?.pointee = false
                 outCycleStart?.pointee = 0

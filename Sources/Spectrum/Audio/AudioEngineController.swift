@@ -144,7 +144,6 @@ final class AudioEngineController {
         }
         processFormat = format
         clock.sampleRate = sampleRate
-        clock.reset()
         let realtime = RealtimeRenderer(format: format, maxFrames: Self.maxFrames, clock: clock)
         renderer = realtime
 
