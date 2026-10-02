@@ -3,7 +3,7 @@ import AVFoundation
 
 /// Settings-style main window: a preference toolbar with two big tabs (Plugin Chain, Audio Settings)
 /// and a shared bottom bar with meters, status and Start/Stop.
-final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate {
+final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSTableViewDataSource, NSTableViewDelegate {
     private let engine: AudioEngineController
     /// Called when the user closes the window; the app decides what to do (hide to the menu bar).
     var onHide: (() -> Void)?
@@ -28,8 +28,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private let muteSwitch = NSSwitch()
 
     // Plugin chain controls
-    private let pluginStack = NSStackView()
+    private let pluginTable = NSTableView()
     private let emptyLabel = NSTextField(wrappingLabelWithString: "No plugins yet. Click “Add Plugin…” to load one, for example FabFilter Pro-Q 4.")
+    private static let dragType = NSPasteboard.PasteboardType("design.webake.spectrum.plugin-row")
 
     // Shared bottom bar
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
@@ -218,34 +219,55 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         headerRow.distribution = .fill
         headerRow.alignment = .centerY
 
-        pluginStack.orientation = .vertical
-        pluginStack.alignment = .leading
-        pluginStack.spacing = 0
         emptyLabel.textColor = .secondaryLabelColor
+        emptyLabel.alignment = .center
+
+        let pluginColumn = NSTableColumn(identifier: .init("plugin"))
+        pluginColumn.title = "Plugin"
+        pluginColumn.resizingMask = .autoresizingMask
+        let bypassColumn = NSTableColumn(identifier: .init("bypass"))
+        bypassColumn.title = "Bypass"
+        bypassColumn.width = 70
+        bypassColumn.resizingMask = []
+        let orderColumn = NSTableColumn(identifier: .init("order"))
+        orderColumn.title = "Order"
+        orderColumn.width = 86
+        orderColumn.resizingMask = []
+        for column in [pluginColumn, bypassColumn, orderColumn] { pluginTable.addTableColumn(column) }
+        pluginTable.dataSource = self
+        pluginTable.delegate = self
+        pluginTable.style = .plain
+        pluginTable.rowHeight = 46
+        pluginTable.intercellSpacing = NSSize(width: 0, height: 0)
+        pluginTable.usesAlternatingRowBackgroundColors = false
+        pluginTable.selectionHighlightStyle = .none
+        pluginTable.backgroundColor = .clear
+        pluginTable.gridStyleMask = []
+        pluginTable.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+        pluginTable.allowsColumnReordering = false
+        pluginTable.allowsColumnResizing = false
+        pluginTable.registerForDraggedTypes([Self.dragType])
+        pluginTable.setDraggingSourceOperationMask(.move, forLocal: true)
+        pluginTable.draggingDestinationFeedbackStyle = .gap
 
         let group = GroupBoxView()
-        let flipped = FlippedClipDocument()
-        flipped.translatesAutoresizingMaskIntoConstraints = false
-        pluginStack.translatesAutoresizingMaskIntoConstraints = false
-        flipped.addSubview(pluginStack)
         let scroll = NSScrollView()
-        scroll.documentView = flipped
+        scroll.documentView = pluginTable
         scroll.hasVerticalScroller = true
         scroll.borderType = .noBorder
         scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
         group.addSubview(scroll)
+        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
+        group.addSubview(emptyLabel)
         NSLayoutConstraint.activate([
             scroll.topAnchor.constraint(equalTo: group.topAnchor),
             scroll.leadingAnchor.constraint(equalTo: group.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: group.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: group.bottomAnchor),
-            pluginStack.topAnchor.constraint(equalTo: flipped.topAnchor),
-            pluginStack.leadingAnchor.constraint(equalTo: flipped.leadingAnchor),
-            pluginStack.trailingAnchor.constraint(equalTo: flipped.trailingAnchor),
-            pluginStack.bottomAnchor.constraint(lessThanOrEqualTo: flipped.bottomAnchor),
-            flipped.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
-            flipped.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor),
+            emptyLabel.centerXAnchor.constraint(equalTo: group.centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: group.centerYAnchor),
+            emptyLabel.widthAnchor.constraint(lessThanOrEqualTo: group.widthAnchor, constant: -60),
         ])
 
         let stack = NSStackView(views: [headerRow, group])
@@ -369,84 +391,99 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     private func rebuildPluginRows() {
-        for view in pluginStack.arrangedSubviews {
-            pluginStack.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
-        if engine.slots.isEmpty {
-            let padding = NSStackView(views: [emptyLabel])
-            padding.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
-            pluginStack.addArrangedSubview(padding)
-            padding.widthAnchor.constraint(equalTo: pluginStack.widthAnchor).isActive = true
-            return
-        }
-        for (index, slot) in engine.slots.enumerated() {
-            if index > 0 {
-                let line = NSBox()
-                line.boxType = .separator
-                pluginStack.addArrangedSubview(line)
-                line.widthAnchor.constraint(equalTo: pluginStack.widthAnchor, constant: -28).isActive = true
-            }
-            let view = row(for: slot, index: index)
-            pluginStack.addArrangedSubview(view)
-            // Constrain only once both views share a superview, otherwise AppKit throws.
-            view.widthAnchor.constraint(equalTo: pluginStack.widthAnchor).isActive = true
+        pluginTable.reloadData()
+        emptyLabel.isHidden = !engine.slots.isEmpty
+        pluginTable.enclosingScrollView?.isHidden = engine.slots.isEmpty
+    }
+
+    // MARK: - Plugin table
+
+    func numberOfRows(in tableView: NSTableView) -> Int { engine.slots.count }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard row < engine.slots.count, let column = tableColumn?.identifier.rawValue else { return nil }
+        let slot = engine.slots[row]
+        switch column {
+        case "plugin":
+            let name = NSTextField(labelWithString: slot.name)
+            name.font = .systemFont(ofSize: 13)
+            name.lineBreakMode = .byTruncatingTail
+            let maker = NSTextField(labelWithString: slot.supportsStereo ? slot.manufacturer : "\(slot.manufacturer) · stereo not supported, skipped")
+            maker.font = .systemFont(ofSize: 11)
+            maker.textColor = slot.supportsStereo ? .secondaryLabelColor : .systemOrange
+            let names = NSStackView(views: [name, maker])
+            names.orientation = .vertical
+            names.alignment = .leading
+            names.spacing = 1
+            let open = NSButton(title: "Open", target: self, action: #selector(openPluginUI(_:)))
+            open.tag = row
+            open.bezelStyle = .rounded
+            open.controlSize = .small
+            open.font = .systemFont(ofSize: 11)
+            return cell([names, open], spacing: 10, leading: 14)
+        case "bypass":
+            let bypassSwitch = NSSwitch()
+            bypassSwitch.controlSize = .small
+            bypassSwitch.tag = row
+            bypassSwitch.state = slot.bypassed ? .on : .off
+            bypassSwitch.target = self
+            bypassSwitch.action = #selector(toggleBypass(_:))
+            return cell([bypassSwitch], spacing: 0, leading: 10)
+        default:
+            let handle = NSImageView(image: NSImage(systemSymbolName: "line.3.horizontal", accessibilityDescription: "Drag to reorder")!)
+            handle.contentTintColor = .tertiaryLabelColor
+            handle.toolTip = "Drag to reorder"
+            let remove = NSButton(image: NSImage(systemSymbolName: "minus.circle", accessibilityDescription: "Remove")!, target: self, action: #selector(removePlugin(_:)))
+            remove.tag = row
+            remove.bezelStyle = .rounded
+            remove.isBordered = false
+            remove.contentTintColor = .secondaryLabelColor
+            remove.toolTip = "Remove from chain"
+            return cell([handle, remove], spacing: 12, leading: 12)
         }
     }
 
-    private func row(for slot: PluginSlot, index: Int) -> NSView {
-        let number = NSTextField(labelWithString: "\(index + 1)")
-        number.textColor = .tertiaryLabelColor
-        number.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        number.widthAnchor.constraint(equalToConstant: 16).isActive = true
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let view = SeparatorRowView()
+        view.isLast = row == engine.slots.count - 1
+        return view
+    }
 
-        let name = NSTextField(labelWithString: slot.name)
-        name.font = .systemFont(ofSize: 13)
-        name.lineBreakMode = .byTruncatingTail
-        let maker = NSTextField(labelWithString: slot.supportsStereo ? slot.manufacturer : "\(slot.manufacturer) · stereo not supported, skipped")
-        maker.font = .systemFont(ofSize: 11)
-        maker.textColor = slot.supportsStereo ? .secondaryLabelColor : .systemOrange
-        let names = NSStackView(views: [name, maker])
-        names.orientation = .vertical
-        names.alignment = .leading
-        names.spacing = 1
-        names.setContentHuggingPriority(.init(1), for: .horizontal)
-        names.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    private func cell(_ views: [NSView], spacing: CGFloat, leading: CGFloat) -> NSView {
+        let container = NSTableCellView()
+        let stack = NSStackView(views: views)
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = spacing
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: leading),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8),
+            stack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+        ])
+        return container
+    }
 
-        let editor = NSButton(title: "Editor", target: self, action: #selector(openPluginUI(_:)))
-        editor.tag = index
-        editor.bezelStyle = .rounded
-        let bypassLabel = NSTextField(labelWithString: "Bypass")
-        bypassLabel.font = .systemFont(ofSize: 12)
-        bypassLabel.textColor = .secondaryLabelColor
-        let bypassSwitch = NSSwitch()
-        bypassSwitch.controlSize = .small
-        bypassSwitch.tag = index
-        bypassSwitch.state = slot.bypassed ? .on : .off
-        bypassSwitch.target = self
-        bypassSwitch.action = #selector(toggleBypass(_:))
-        let up = NSButton(image: NSImage(systemSymbolName: "chevron.up", accessibilityDescription: "Move up")!, target: self, action: #selector(movePluginUp(_:)))
-        up.tag = index
-        up.bezelStyle = .rounded
-        up.isEnabled = index > 0
-        let down = NSButton(image: NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Move down")!, target: self, action: #selector(movePluginDown(_:)))
-        down.tag = index
-        down.bezelStyle = .rounded
-        down.isEnabled = index < engine.slots.count - 1
-        let remove = NSButton(image: NSImage(systemSymbolName: "minus.circle", accessibilityDescription: "Remove")!, target: self, action: #selector(removePlugin(_:)))
-        remove.tag = index
-        remove.bezelStyle = .rounded
+    // Drag and drop reordering
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+        let item = NSPasteboardItem()
+        item.setString(String(row), forType: Self.dragType)
+        return item
+    }
 
-        let row = NSStackView(views: [number, names, editor, bypassLabel, bypassSwitch, up, down, remove])
-        row.orientation = .horizontal
-        row.distribution = .fill
-        row.alignment = .centerY
-        row.spacing = 8
-        row.setCustomSpacing(4, after: bypassLabel)
-        names.setHuggingPriority(.init(1), for: .horizontal)
-        row.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
-        row.translatesAutoresizingMaskIntoConstraints = false
-        return row
+    func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int,
+                   proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
+        guard info.draggingSource as? NSTableView === tableView else { return [] }
+        if dropOperation == .on { tableView.setDropRow(row, dropOperation: .above) }
+        return .move
+    }
+
+    func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo, row: Int,
+                   dropOperation: NSTableView.DropOperation) -> Bool {
+        guard let text = info.draggingPasteboard.string(forType: Self.dragType), let source = Int(text) else { return false }
+        engine.movePlugin(from: source, to: row)
+        return true
     }
 
     private func updateMeters(_ left: Float, _ right: Float) {
@@ -525,16 +562,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     @objc private func toggleBypass(_ sender: NSSwitch) {
         guard sender.tag < engine.slots.count else { return }
         engine.setBypass(engine.slots[sender.tag], sender.state == .on)
-    }
-
-    @objc private func movePluginUp(_ sender: NSButton) {
-        guard sender.tag < engine.slots.count else { return }
-        engine.movePlugin(engine.slots[sender.tag], by: -1)
-    }
-
-    @objc private func movePluginDown(_ sender: NSButton) {
-        guard sender.tag < engine.slots.count else { return }
-        engine.movePlugin(engine.slots[sender.tag], by: 1)
     }
 
     @objc private func removePlugin(_ sender: NSButton) {
@@ -640,7 +667,14 @@ final class FormRow: NSStackView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
-/// Document view that lays out from the top so the plugin list grows downward.
-private final class FlippedClipDocument: NSView {
-    override var isFlipped: Bool { true }
+/// Table row with a hairline separator underneath (only real rows, not the empty area).
+private final class SeparatorRowView: NSTableRowView {
+    var isLast = false
+
+    override func drawBackground(in dirtyRect: NSRect) {
+        super.drawBackground(in: dirtyRect)
+        guard !isLast else { return }
+        NSColor.separatorColor.setFill()
+        NSRect(x: 14, y: bounds.maxY - 1, width: bounds.width - 28, height: 1).fill()
+    }
 }

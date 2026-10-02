@@ -296,6 +296,18 @@ final class AudioEngineController {
         notify()
     }
 
+    /// Moves a plugin to an arbitrary position (drag and drop reordering).
+    func movePlugin(from source: Int, to destination: Int) {
+        guard source >= 0, source < slots.count, destination >= 0, destination <= slots.count else { return }
+        var target = destination
+        if source < target { target -= 1 }
+        guard source != target else { return }
+        let slot = slots.remove(at: source)
+        slots.insert(slot, at: target)
+        publishChain()
+        notify()
+    }
+
     func setBypass(_ slot: PluginSlot, _ bypassed: Bool) {
         slot.bypassed = bypassed
         notify()
