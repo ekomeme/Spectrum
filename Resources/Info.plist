@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>es</string>
+	<string>en</string>
 	<key>CFBundleExecutable</key>
 	<string>Spectrum</string>
 	<key>CFBundleIdentifier</key>
@@ -31,8 +31,8 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>Spectrum necesita capturar el audio del sistema para pasarlo por tus plugins AU en tiempo real.</string>
+	<string>Spectrum captures system audio to run it through your Audio Unit plugins in real time.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Spectrum necesita acceso a la entrada de audio para procesarla con tus plugins AU.</string>
+	<string>Spectrum needs access to the audio input to process it with your Audio Unit plugins.</string>
 </dict>
 </plist>

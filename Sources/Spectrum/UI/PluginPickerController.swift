@@ -7,7 +7,7 @@ final class PluginPickerController: NSWindowController, NSTableViewDataSource, N
     private var filtered: [AVAudioUnitComponent]
     private let searchField = NSSearchField()
     private let tableView = NSTableView()
-    private let addButton = NSButton(title: "Añadir", target: nil, action: nil)
+    private let addButton = NSButton(title: "Add", target: nil, action: nil)
     var onPick: ((AVAudioUnitComponent) -> Void)?
 
     init(components: [AVAudioUnitComponent]) {
@@ -24,7 +24,7 @@ final class PluginPickerController: NSWindowController, NSTableViewDataSource, N
     private func buildUI() {
         guard let window, let content = window.contentView else { return }
 
-        searchField.placeholderString = "Buscar plugin (p. ej. Pro-Q)"
+        searchField.placeholderString = "Search plugins (e.g. Pro-Q)"
         searchField.delegate = self
         searchField.translatesAutoresizingMaskIntoConstraints = false
 
@@ -32,7 +32,7 @@ final class PluginPickerController: NSWindowController, NSTableViewDataSource, N
         nameColumn.title = "Plugin"
         nameColumn.width = 260
         let makerColumn = NSTableColumn(identifier: .init("maker"))
-        makerColumn.title = "Fabricante"
+        makerColumn.title = "Manufacturer"
         makerColumn.width = 180
         tableView.addTableColumn(nameColumn)
         tableView.addTableColumn(makerColumn)
@@ -49,7 +49,7 @@ final class PluginPickerController: NSWindowController, NSTableViewDataSource, N
         scroll.borderType = .bezelBorder
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
-        let cancel = NSButton(title: "Cancelar", target: self, action: #selector(cancel(_:)))
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel(_:)))
         cancel.keyEquivalent = "\u{1b}"
         addButton.target = self
         addButton.action = #selector(confirm)
@@ -60,7 +60,7 @@ final class PluginPickerController: NSWindowController, NSTableViewDataSource, N
         buttons.orientation = .horizontal
         buttons.translatesAutoresizingMaskIntoConstraints = false
 
-        let title = NSTextField(labelWithString: "Elige un plugin Audio Unit")
+        let title = NSTextField(labelWithString: "Choose an Audio Unit plugin")
         title.font = .boldSystemFont(ofSize: 14)
         title.translatesAutoresizingMaskIntoConstraints = false
 

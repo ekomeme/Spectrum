@@ -1,38 +1,68 @@
 import AppKit
 import AVFoundation
 
-/// The control panel: source, output, buffer size, plugin chain, meters and start/stop.
-final class MainWindowController: NSWindowController, NSWindowDelegate {
+/// Settings-style main window: a preference toolbar with two big tabs (Plugin Chain, Audio Settings)
+/// and a shared bottom bar with meters, status and Start/Stop.
+final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate {
     private let engine: AudioEngineController
     /// Called when the user closes the window; the app decides what to do (hide to the menu bar).
     var onHide: (() -> Void)?
 
+    enum Tab: String, CaseIterable {
+        case pluginChain, audioSettings
+
+        var identifier: NSToolbarItem.Identifier { NSToolbarItem.Identifier(rawValue) }
+        var label: String { self == .pluginChain ? "Plugin Chain" : "Audio Settings" }
+        var symbol: String { self == .pluginChain ? "slider.horizontal.3" : "speaker.wave.2" }
+    }
+
+    private var currentTab: Tab = .pluginChain
+    private let tabContainer = NSView()
+    private var pluginChainView: NSView!
+    private var audioSettingsView: NSView!
+
+    // Audio settings controls
     private let sourcePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let outputPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let bufferPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let muteCheck = NSButton(checkboxWithTitle: "Silenciar el audio original (escuchar solo la señal procesada)", target: nil, action: nil)
+    private let muteSwitch = NSSwitch()
+
+    // Plugin chain controls
     private let pluginStack = NSStackView()
-    private let emptyLabel = NSTextField(wrappingLabelWithString: "Sin plugins. Pulsa “Añadir plugin…” para cargar, por ejemplo, FabFilter Pro-Q 4.")
+    private let emptyLabel = NSTextField(wrappingLabelWithString: "No plugins yet. Click “Add Plugin…” to load one, for example FabFilter Pro-Q 4.")
+
+    // Shared bottom bar
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let meterLeft = NSLevelIndicator()
     private let meterRight = NSLevelIndicator()
-    private let startButton = NSButton(title: "Iniciar", target: nil, action: nil)
+    private let startButton = NSButton(title: "Start", target: nil, action: nil)
+
     private var pickerController: PluginPickerController?
     private var devices: [AudioDevice] = []
-    private var meterDecayTimer: Timer?
 
     init(engine: AudioEngineController) {
         self.engine = engine
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 560),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 520),
+                              styleMask: [.titled, .closable, .miniaturizable],
                               backing: .buffered, defer: false)
-        window.title = "Spectrum"
-        window.minSize = NSSize(width: 560, height: 480)
+        window.title = Tab.pluginChain.label
         window.center()
         window.setFrameAutosaveName("SpectrumMainWindow")
+        window.toolbarStyle = .preference
         super.init(window: window)
         window.delegate = self
+
+        let toolbar = NSToolbar(identifier: "SpectrumToolbar")
+        toolbar.delegate = self
+        toolbar.allowsUserCustomization = false
+        toolbar.displayMode = .iconAndLabel
+        toolbar.selectedItemIdentifier = Tab.pluginChain.identifier
+        window.toolbar = toolbar
+
+        pluginChainView = buildPluginChainView()
+        audioSettingsView = buildAudioSettingsView()
         buildUI()
+        showTab(.pluginChain, animated: false)
 
         engine.onStateChange = { [weak self] in self?.refresh() }
         engine.onLevel = { [weak self] left, right in self?.updateMeters(left, right) }
@@ -51,65 +81,76 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         return true
     }
 
+    /// Diagnostics only.
+    func selectTabForSnapshot(_ tab: Tab) { showTab(tab, animated: false) }
+
+    // MARK: - Toolbar (tabs)
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        Tab.allCases.map(\.identifier)
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarDefaultItemIdentifiers(toolbar)
+    }
+
+    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarDefaultItemIdentifiers(toolbar)
+    }
+
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        guard let tab = Tab(rawValue: itemIdentifier.rawValue) else { return nil }
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.label = tab.label
+        item.paletteLabel = tab.label
+        item.image = NSImage(systemSymbolName: tab.symbol, accessibilityDescription: tab.label)
+        item.target = self
+        item.action = #selector(tabSelected(_:))
+        return item
+    }
+
+    @objc private func tabSelected(_ sender: NSToolbarItem) {
+        guard let tab = Tab(rawValue: sender.itemIdentifier.rawValue) else { return }
+        showTab(tab, animated: true)
+    }
+
+    private func showTab(_ tab: Tab, animated: Bool) {
+        currentTab = tab
+        window?.title = tab.label
+        window?.toolbar?.selectedItemIdentifier = tab.identifier
+        for view in tabContainer.subviews { view.removeFromSuperview() }
+        let view: NSView = tab == .pluginChain ? pluginChainView : audioSettingsView
+        view.translatesAutoresizingMaskIntoConstraints = false
+        tabContainer.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: tabContainer.topAnchor),
+            view.leadingAnchor.constraint(equalTo: tabContainer.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: tabContainer.trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: tabContainer.bottomAnchor),
+        ])
+        fitWindowToContent(animated: animated)
+    }
+
+    /// Settings-style windows resize to fit the selected pane.
+    private func fitWindowToContent(animated: Bool) {
+        guard let window, let content = window.contentView else { return }
+        content.layoutSubtreeIfNeeded()
+        let target = content.fittingSize
+        var frame = window.frame
+        let newFrame = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 620, height: target.height))
+        let delta = newFrame.height - frame.height
+        frame.origin.y -= delta
+        frame.size = NSSize(width: newFrame.width, height: newFrame.height)
+        window.setFrame(frame, display: true, animate: animated)
+    }
+
     // MARK: - Layout
 
     private func buildUI() {
         guard let content = window?.contentView else { return }
 
-        let header = NSTextField(labelWithString: "Spectrum")
-        header.font = .systemFont(ofSize: 22, weight: .bold)
-        let subtitle = NSTextField(wrappingLabelWithString: "Escucha el audio de tu Mac a través de plugins Audio Unit en tiempo real.")
-        subtitle.textColor = .secondaryLabelColor
-
-        sourcePopup.target = self; sourcePopup.action = #selector(sourceChanged)
-        outputPopup.target = self; outputPopup.action = #selector(outputChanged)
-        bufferPopup.target = self; bufferPopup.action = #selector(bufferChanged)
-        for size in [64, 128, 256, 512, 1024] {
-            bufferPopup.addItem(withTitle: "\(size) frames")
-            bufferPopup.lastItem?.tag = size
-        }
-        muteCheck.target = self; muteCheck.action = #selector(muteChanged)
-
-        let grid = NSGridView(views: [
-            [label("Fuente"), sourcePopup],
-            [label("Salida"), outputPopup],
-            [label("Buffer"), bufferPopup],
-            [NSView(), muteCheck],
-        ])
-        grid.rowSpacing = 8
-        grid.columnSpacing = 12
-        grid.column(at: 0).xPlacement = .trailing
-        grid.column(at: 1).width = 380
-
-        let pluginsHeader = NSTextField(labelWithString: "Cadena de plugins")
-        pluginsHeader.font = .systemFont(ofSize: 15, weight: .semibold)
-        let addButton = NSButton(title: "Añadir plugin…", target: self, action: #selector(addPlugin))
-        addButton.bezelStyle = .rounded
-        let pluginsHeaderRow = NSStackView(views: [pluginsHeader, NSView(), addButton])
-        pluginsHeaderRow.orientation = .horizontal
-
-        pluginStack.orientation = .vertical
-        pluginStack.alignment = .leading
-        pluginStack.spacing = 6
-        emptyLabel.textColor = .secondaryLabelColor
-
-        let pluginScroll = NSScrollView()
-        let flipped = FlippedClipDocument()
-        flipped.translatesAutoresizingMaskIntoConstraints = false
-        pluginStack.translatesAutoresizingMaskIntoConstraints = false
-        flipped.addSubview(pluginStack)
-        pluginScroll.documentView = flipped
-        pluginScroll.hasVerticalScroller = true
-        pluginScroll.borderType = .bezelBorder
-        pluginScroll.drawsBackground = true
-        NSLayoutConstraint.activate([
-            pluginStack.topAnchor.constraint(equalTo: flipped.topAnchor, constant: 8),
-            pluginStack.leadingAnchor.constraint(equalTo: flipped.leadingAnchor, constant: 8),
-            pluginStack.trailingAnchor.constraint(equalTo: flipped.trailingAnchor, constant: -8),
-            pluginStack.bottomAnchor.constraint(lessThanOrEqualTo: flipped.bottomAnchor, constant: -8),
-            flipped.widthAnchor.constraint(equalTo: pluginScroll.contentView.widthAnchor),
-            flipped.heightAnchor.constraint(greaterThanOrEqualTo: pluginScroll.contentView.heightAnchor),
-        ])
+        tabContainer.translatesAutoresizingMaskIntoConstraints = false
 
         for meter in [meterLeft, meterRight] {
             meter.levelIndicatorStyle = .continuousCapacity
@@ -119,13 +160,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             meter.criticalValue = 0.97
             meter.doubleValue = 0
             meter.heightAnchor.constraint(equalToConstant: 8).isActive = true
+            meter.widthAnchor.constraint(equalToConstant: 200).isActive = true
         }
         let meters = NSStackView(views: [meterLeft, meterRight])
         meters.orientation = .vertical
         meters.spacing = 3
         meters.alignment = .leading
-        meterLeft.widthAnchor.constraint(equalToConstant: 220).isActive = true
-        meterRight.widthAnchor.constraint(equalToConstant: 220).isActive = true
 
         startButton.target = self
         startButton.action = #selector(toggleEngine)
@@ -135,19 +175,21 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
         statusLabel.font = .systemFont(ofSize: 12)
         statusLabel.textColor = .secondaryLabelColor
-
-        let bottom = NSStackView(views: [meters, statusLabel, startButton])
-        bottom.orientation = .horizontal
-        bottom.alignment = .centerY
-        bottom.spacing = 14
         statusLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let root = NSStackView(views: [header, subtitle, grid, separator(), pluginsHeaderRow, pluginScroll, separator(), bottom])
+        let bottom = NSStackView(views: [meters, statusLabel, startButton])
+        bottom.orientation = .horizontal
+        bottom.distribution = .fill
+        bottom.alignment = .centerY
+        statusLabel.setContentHuggingPriority(.init(1), for: .horizontal)
+        bottom.spacing = 14
+
+        let root = NSStackView(views: [tabContainer, separator(), bottom])
         root.orientation = .vertical
         root.alignment = .leading
-        root.spacing = 12
-        root.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
+        root.spacing = 14
+        root.edgeInsets = NSEdgeInsets(top: 16, left: 20, bottom: 20, right: 20)
         root.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(root)
         NSLayoutConstraint.activate([
@@ -155,10 +197,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             root.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             root.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             root.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            subtitle.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -40),
-            pluginsHeaderRow.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -40),
-            pluginScroll.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -40),
-            pluginScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 140),
+            tabContainer.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -40),
             bottom.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -40),
         ])
         for sep in root.arrangedSubviews where sep is NSBox {
@@ -166,10 +205,103 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
-    private func label(_ text: String) -> NSTextField {
+    /// Plugin Chain tab: "Add Plugin…" button and the grouped list of loaded plugins.
+    private func buildPluginChainView() -> NSView {
+        let title = NSTextField(labelWithString: "Plugins run in order, top to bottom.")
+        title.textColor = .secondaryLabelColor
+        title.font = .systemFont(ofSize: 12)
+        let addButton = NSButton(title: "Add Plugin…", target: self, action: #selector(addPlugin))
+        addButton.bezelStyle = .rounded
+        title.setContentHuggingPriority(.init(1), for: .horizontal)
+        let headerRow = NSStackView(views: [title, addButton])
+        headerRow.orientation = .horizontal
+        headerRow.distribution = .fill
+        headerRow.alignment = .centerY
+
+        pluginStack.orientation = .vertical
+        pluginStack.alignment = .leading
+        pluginStack.spacing = 0
+        emptyLabel.textColor = .secondaryLabelColor
+
+        let group = GroupBoxView()
+        let flipped = FlippedClipDocument()
+        flipped.translatesAutoresizingMaskIntoConstraints = false
+        pluginStack.translatesAutoresizingMaskIntoConstraints = false
+        flipped.addSubview(pluginStack)
+        let scroll = NSScrollView()
+        scroll.documentView = flipped
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        group.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: group.topAnchor),
+            scroll.leadingAnchor.constraint(equalTo: group.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: group.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: group.bottomAnchor),
+            pluginStack.topAnchor.constraint(equalTo: flipped.topAnchor),
+            pluginStack.leadingAnchor.constraint(equalTo: flipped.leadingAnchor),
+            pluginStack.trailingAnchor.constraint(equalTo: flipped.trailingAnchor),
+            pluginStack.bottomAnchor.constraint(lessThanOrEqualTo: flipped.bottomAnchor),
+            flipped.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            flipped.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor),
+        ])
+
+        let stack = NSStackView(views: [headerRow, group])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            headerRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            group.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            group.heightAnchor.constraint(equalToConstant: 300),
+        ])
+        return stack
+    }
+
+    /// Audio Settings tab: grouped form with source, output, buffer size and the mute switch.
+    private func buildAudioSettingsView() -> NSView {
+        sourcePopup.target = self; sourcePopup.action = #selector(sourceChanged)
+        outputPopup.target = self; outputPopup.action = #selector(outputChanged)
+        bufferPopup.target = self; bufferPopup.action = #selector(bufferChanged)
+        for size in [64, 128, 256, 512, 1024] {
+            bufferPopup.addItem(withTitle: "\(size) frames")
+            bufferPopup.lastItem?.tag = size
+        }
+        muteSwitch.target = self; muteSwitch.action = #selector(muteChanged)
+        for popup in [sourcePopup, outputPopup, bufferPopup] {
+            popup.widthAnchor.constraint(lessThanOrEqualToConstant: 320).isActive = true
+        }
+
+        let routing = GroupBoxView()
+        routing.addRows([
+            FormRow(title: "Source", subtitle: "What Spectrum listens to", control: sourcePopup),
+            FormRow(title: "Output", subtitle: "Where the processed audio plays", control: outputPopup),
+            FormRow(title: "Buffer size", subtitle: "Smaller is lower latency, higher CPU", control: bufferPopup),
+        ])
+        let behaviour = GroupBoxView()
+        behaviour.addRows([
+            FormRow(title: "Mute original audio", subtitle: "Only hear the signal processed by Spectrum", control: muteSwitch),
+        ])
+
+        let stack = NSStackView(views: [sectionTitle("Routing"), routing, sectionTitle("System audio"), behaviour])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.setCustomSpacing(18, after: routing)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            routing.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            behaviour.widthAnchor.constraint(equalTo: stack.widthAnchor),
+        ])
+        return stack
+    }
+
+    private func sectionTitle(_ text: String) -> NSTextField {
         let field = NSTextField(labelWithString: text)
-        field.alignment = .right
-        field.textColor = .secondaryLabelColor
+        field.font = .systemFont(ofSize: 13, weight: .semibold)
         return field
     }
 
@@ -185,7 +317,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         devices = AudioDeviceManager.shared.allDevices()
 
         sourcePopup.removeAllItems()
-        sourcePopup.addItem(withTitle: "Audio del sistema (todas las apps)")
+        sourcePopup.addItem(withTitle: "System audio (all apps)")
         sourcePopup.lastItem?.representedObject = nil
         sourcePopup.menu?.addItem(.separator())
         for device in devices where device.hasInput {
@@ -202,35 +334,35 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         outputPopup.removeAllItems()
         let defaultOutput = AudioDeviceManager.shared.defaultOutputDeviceID()
         for device in devices where device.hasOutput {
-            let suffix = device.id == defaultOutput ? " · predeterminada" : ""
+            let suffix = device.id == defaultOutput ? " · default" : ""
             outputPopup.addItem(withTitle: device.name + suffix)
             outputPopup.lastItem?.representedObject = device.uid
         }
         if let uid = engine.settings.outputDeviceUID,
            let index = outputPopup.itemArray.firstIndex(where: { ($0.representedObject as? String) == uid }) {
             outputPopup.selectItem(at: index)
-        } else if let index = outputPopup.itemArray.firstIndex(where: { $0.title.hasSuffix("predeterminada") }) {
+        } else if let index = outputPopup.itemArray.firstIndex(where: { $0.title.hasSuffix("default") }) {
             outputPopup.selectItem(at: index)
         }
 
         bufferPopup.selectItem(withTag: Int(engine.settings.bufferSize))
         if bufferPopup.selectedItem == nil { bufferPopup.selectItem(withTag: 256) }
-        muteCheck.state = engine.settings.muteOriginal ? .on : .off
-        muteCheck.isEnabled = engine.settings.sourceDeviceUID == nil
+        muteSwitch.state = engine.settings.muteOriginal ? .on : .off
+        muteSwitch.isEnabled = engine.settings.sourceDeviceUID == nil
     }
 
     // MARK: - Refresh
 
     func refresh() {
-        startButton.title = engine.isRunning ? "Detener" : "Iniciar"
+        startButton.title = engine.isRunning ? "Stop" : "Start"
         if let error = engine.lastError {
             statusLabel.stringValue = "⚠️ \(error)"
             statusLabel.textColor = .systemRed
         } else if engine.isRunning {
-            statusLabel.stringValue = "● En marcha · \(engine.statusDetail)"
+            statusLabel.stringValue = "● Running · \(engine.statusDetail)"
             statusLabel.textColor = .systemGreen
         } else {
-            statusLabel.stringValue = "○ Detenido"
+            statusLabel.stringValue = "○ Stopped"
             statusLabel.textColor = .secondaryLabelColor
         }
         rebuildPluginRows()
@@ -242,10 +374,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             view.removeFromSuperview()
         }
         if engine.slots.isEmpty {
-            pluginStack.addArrangedSubview(emptyLabel)
+            let padding = NSStackView(views: [emptyLabel])
+            padding.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+            pluginStack.addArrangedSubview(padding)
+            padding.widthAnchor.constraint(equalTo: pluginStack.widthAnchor).isActive = true
             return
         }
         for (index, slot) in engine.slots.enumerated() {
+            if index > 0 {
+                let line = NSBox()
+                line.boxType = .separator
+                pluginStack.addArrangedSubview(line)
+                line.widthAnchor.constraint(equalTo: pluginStack.widthAnchor, constant: -28).isActive = true
+            }
             let view = row(for: slot, index: index)
             pluginStack.addArrangedSubview(view)
             // Constrain only once both views share a superview, otherwise AppKit throws.
@@ -254,45 +395,48 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func row(for slot: PluginSlot, index: Int) -> NSView {
-        let number = NSTextField(labelWithString: "\(index + 1).")
-        number.textColor = .secondaryLabelColor
-        number.widthAnchor.constraint(equalToConstant: 22).isActive = true
+        let number = NSTextField(labelWithString: "\(index + 1)")
+        number.textColor = .tertiaryLabelColor
+        number.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        number.widthAnchor.constraint(equalToConstant: 16).isActive = true
 
         let name = NSTextField(labelWithString: slot.name)
-        name.font = .systemFont(ofSize: 13, weight: .semibold)
+        name.font = .systemFont(ofSize: 13)
         name.lineBreakMode = .byTruncatingTail
-        let maker = NSTextField(labelWithString: slot.supportsStereo ? slot.manufacturer : "\(slot.manufacturer) · no admite estéreo, omitido")
+        let maker = NSTextField(labelWithString: slot.supportsStereo ? slot.manufacturer : "\(slot.manufacturer) · stereo not supported, skipped")
         maker.font = .systemFont(ofSize: 11)
         maker.textColor = slot.supportsStereo ? .secondaryLabelColor : .systemOrange
         let names = NSStackView(views: [name, maker])
         names.orientation = .vertical
         names.alignment = .leading
         names.spacing = 1
-        names.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        names.setContentHuggingPriority(.init(1), for: .horizontal)
         names.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let ui = NSButton(title: "Interfaz", target: self, action: #selector(openPluginUI(_:)))
-        ui.tag = index
-        ui.bezelStyle = .rounded
+        let editor = NSButton(title: "Editor", target: self, action: #selector(openPluginUI(_:)))
+        editor.tag = index
+        editor.bezelStyle = .rounded
         let bypass = NSButton(checkboxWithTitle: "Bypass", target: self, action: #selector(toggleBypass(_:)))
         bypass.tag = index
         bypass.state = slot.bypassed ? .on : .off
-        let up = NSButton(title: "▲", target: self, action: #selector(movePluginUp(_:)))
+        let up = NSButton(image: NSImage(systemSymbolName: "chevron.up", accessibilityDescription: "Move up")!, target: self, action: #selector(movePluginUp(_:)))
         up.tag = index
         up.bezelStyle = .rounded
         up.isEnabled = index > 0
-        let down = NSButton(title: "▼", target: self, action: #selector(movePluginDown(_:)))
+        let down = NSButton(image: NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Move down")!, target: self, action: #selector(movePluginDown(_:)))
         down.tag = index
         down.bezelStyle = .rounded
         down.isEnabled = index < engine.slots.count - 1
-        let remove = NSButton(title: "Quitar", target: self, action: #selector(removePlugin(_:)))
+        let remove = NSButton(image: NSImage(systemSymbolName: "minus.circle", accessibilityDescription: "Remove")!, target: self, action: #selector(removePlugin(_:)))
         remove.tag = index
         remove.bezelStyle = .rounded
 
-        let row = NSStackView(views: [number, names, ui, bypass, up, down, remove])
+        let row = NSStackView(views: [number, names, editor, bypass, up, down, remove])
         row.orientation = .horizontal
+        row.distribution = .fill
         row.alignment = .centerY
         row.spacing = 8
+        row.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
         row.translatesAutoresizingMaskIntoConstraints = false
         return row
     }
@@ -312,7 +456,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func sourceChanged() {
         engine.settings.sourceDeviceUID = sourcePopup.selectedItem?.representedObject as? String
-        muteCheck.isEnabled = engine.settings.sourceDeviceUID == nil
+        muteSwitch.isEnabled = engine.settings.sourceDeviceUID == nil
         engine.applySettings()
     }
 
@@ -327,7 +471,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func muteChanged() {
-        engine.settings.muteOriginal = muteCheck.state == .on
+        engine.settings.muteOriginal = muteSwitch.state == .on
         engine.applySettings()
     }
 
@@ -397,6 +541,95 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         alert.alertStyle = .warning
         if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
     }
+}
+
+// MARK: - Grouped form helpers (System Settings look)
+
+/// A rounded, bordered container like the grouped boxes in System Settings.
+final class GroupBoxView: NSView {
+    private let stack = NSStackView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = 1
+        translatesAutoresizingMaskIntoConstraints = false
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        updateColors()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColors()
+    }
+
+    private func updateColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+            layer?.borderColor = NSColor.separatorColor.cgColor
+        }
+    }
+
+    func addRows(_ rows: [FormRow]) {
+        if stack.superview == nil {
+            addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.topAnchor.constraint(equalTo: topAnchor),
+                stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+                stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+        }
+        for (index, row) in rows.enumerated() {
+            if index > 0 {
+                let line = NSBox()
+                line.boxType = .separator
+                stack.addArrangedSubview(line)
+                line.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -28).isActive = true
+            }
+            stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+    }
+}
+
+/// Title + optional subtitle on the left, control on the right.
+final class FormRow: NSStackView {
+    init(title: String, subtitle: String? = nil, control: NSView) {
+        super.init(frame: .zero)
+        orientation = .horizontal
+        distribution = .fill
+        alignment = .centerY
+        spacing = 12
+        edgeInsets = NSEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let titleField = NSTextField(labelWithString: title)
+        titleField.font = .systemFont(ofSize: 13)
+        let labels = NSStackView(views: [titleField])
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 1
+        if let subtitle {
+            let sub = NSTextField(labelWithString: subtitle)
+            sub.font = .systemFont(ofSize: 11)
+            sub.textColor = .secondaryLabelColor
+            labels.addArrangedSubview(sub)
+        }
+        labels.setContentHuggingPriority(.init(1), for: .horizontal)
+        labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        addArrangedSubview(labels)
+        addArrangedSubview(control)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
 /// Document view that lays out from the top so the plugin list grows downward.

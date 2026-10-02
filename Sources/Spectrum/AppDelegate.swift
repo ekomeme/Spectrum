@@ -6,7 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private let statusMenu = NSMenu()
     private let stateItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    private let toggleItem = NSMenuItem(title: "Iniciar", action: #selector(toggleEngine), keyEquivalent: "")
+    private let toggleItem = NSMenuItem(title: "Start", action: #selector(toggleEngine), keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu()
@@ -74,13 +74,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.toolTip = "Spectrum"
         }
         statusMenu.delegate = self
-        statusMenu.addItem(withTitle: "Mostrar Spectrum", action: #selector(showMainWindow), keyEquivalent: "")
+        statusMenu.addItem(withTitle: "Show Spectrum", action: #selector(showMainWindow), keyEquivalent: "")
         statusMenu.addItem(.separator())
         stateItem.isEnabled = false
         statusMenu.addItem(stateItem)
         statusMenu.addItem(toggleItem)
         statusMenu.addItem(.separator())
-        statusMenu.addItem(withTitle: "Salir de Spectrum", action: #selector(quit), keyEquivalent: "q")
+        statusMenu.addItem(withTitle: "Quit Spectrum", action: #selector(quit), keyEquivalent: "q")
         for menuItem in statusMenu.items { menuItem.target = self }
         item.menu = statusMenu
         statusItem = item
@@ -90,11 +90,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let error = engine.lastError {
             stateItem.title = "⚠️ \(error)"
         } else if engine.isRunning {
-            stateItem.title = "● En marcha · \(engine.statusDetail)"
+            stateItem.title = "● Running · \(engine.statusDetail)"
         } else {
-            stateItem.title = "○ Detenido"
+            stateItem.title = "○ Stopped"
         }
-        toggleItem.title = engine.isRunning ? "Detener" : "Iniciar"
+        toggleItem.title = engine.isRunning ? "Stop" : "Start"
     }
 
     // MARK: - Main menu
@@ -104,35 +104,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Acerca de Spectrum", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "About Spectrum", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Ocultar Spectrum", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        let hideOthers = appMenu.addItem(withTitle: "Ocultar otros", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Hide Spectrum", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
         hideOthers.keyEquivalentModifierMask = [.command, .option]
-        appMenu.addItem(withTitle: "Mostrar todo", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Salir de Spectrum", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit Spectrum", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
 
         let editItem = NSMenuItem()
-        let editMenu = NSMenu(title: "Edición")
-        editMenu.addItem(withTitle: "Deshacer", action: Selector(("undo:")), keyEquivalent: "z")
-        editMenu.addItem(withTitle: "Rehacer", action: Selector(("redo:")), keyEquivalent: "Z")
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
         editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "Cortar", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copiar", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Pegar", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Seleccionar todo", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = editMenu
         mainMenu.addItem(editItem)
 
         let windowItem = NSMenuItem()
-        let windowMenu = NSMenu(title: "Ventana")
-        windowMenu.addItem(withTitle: "Cerrar", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
-        windowMenu.addItem(withTitle: "Minimizar", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(.separator())
-        windowMenu.addItem(withTitle: "Traer todo al frente", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         windowItem.submenu = windowMenu
         mainMenu.addItem(windowItem)
 

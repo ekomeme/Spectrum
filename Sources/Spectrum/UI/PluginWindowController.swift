@@ -30,7 +30,7 @@ final class PluginWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
         window.delegate = self
 
-        let placeholder = NSTextField(labelWithString: "Cargando interfaz de \(slot.name)…")
+        let placeholder = NSTextField(labelWithString: "Loading \(slot.name) editor…")
         placeholder.alignment = .center
         placeholder.frame = NSRect(x: 0, y: 0, width: 480, height: 200)
         placeholder.autoresizingMask = [.width, .height]

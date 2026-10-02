@@ -45,18 +45,21 @@ The first time you press **Start**, macOS asks for **System Audio Recording** pe
 
 ## Usage
 
-1. **Source**: "System audio (all apps)" or a specific input device (microphone, interface, BlackHole…).
-2. **Output**: the device you want to listen on. It can differ from the system default.
-3. **Buffer**: 64–1024 frames. Smaller means less latency and more CPU; 256 is a good default.
-4. **Mute original audio**: with the system-audio source, silences the other apps' direct output so you only hear the processed path. Turn it off to hear both.
-5. **Add plugin…**: search for "Pro-Q" and add it. Its editor opens automatically; reopen it any time with **Interface**.
-6. Chain several plugins, reorder them (▲ ▼), bypass or remove them.
-7. **Start / Stop**.
-8. Closing the main window with the X keeps Spectrum running from the menu bar icon (waveform). From there you can show the window, start/stop or quit.
+The window has two tabs, System Settings style:
+
+**Plugin Chain**
+- **Add Plugin…** opens a searchable list of every AU effect on your Mac. Pick one (say, Pro‑Q 4) and its editor opens; reopen it any time with **Editor**.
+- Plugins run top to bottom. Reorder them with the chevrons, **Bypass** one, or remove it with the minus button.
+
+**Audio Settings**
+- **Source**: "System audio (all apps)" or a specific input device (microphone, interface, BlackHole…).
+- **Output**: the device you want to listen on. It can differ from the system default.
+- **Buffer size**: 64–1024 frames. Smaller means less latency and more CPU; 256 is a good default.
+- **Mute original audio**: with the system-audio source, silences the other apps' direct output so you only hear the processed path. Turn it off to hear both.
+
+The bottom bar (output meters, status, **Start / Stop**) is always visible. Closing the window with the X keeps Spectrum running from the menu bar icon (waveform); from there you can show the window, start/stop or quit.
 
 On quit, Spectrum saves the plugin chain with each plugin's full state (EQ curves, presets…), the selected devices and whether it was running, and restores all of it on the next launch. The session lives in `~/Library/Application Support/Spectrum/session.plist`.
-
-The UI is currently in Spanish; an English localisation is a welcome contribution.
 
 ## How it works
 
@@ -128,7 +131,7 @@ Contributions are welcome. If you find a bug or want to propose an improvement:
 .build/release/Spectrum --selftest <inUID> <outUID> --tone --add-late
 ```
 
-Ideas on the list: English UI, whole-chain presets, global keyboard shortcuts for bypass, total latency readout, VST3 support through a wrapper.
+Ideas on the list: Spanish localisation, whole-chain presets, global keyboard shortcuts for bypass, total latency readout, VST3 support through a wrapper.
 
 ## License
 

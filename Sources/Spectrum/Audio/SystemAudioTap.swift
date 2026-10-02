@@ -12,7 +12,7 @@ final class SystemAudioTap {
         if let me = CoreAudio.currentProcessObjectID() {
             excluded.append(me)
         } else {
-            throw CoreAudioError.message("No se pudo identificar el proceso propio para excluirlo de la captura.")
+            throw CoreAudioError.message("Could not identify Spectrum's own process to exclude it from the capture.")
         }
 
         let description = CATapDescription(stereoGlobalTapButExcludeProcesses: excluded)
@@ -24,7 +24,7 @@ final class SystemAudioTap {
         var id = AudioObjectID(kAudioObjectUnknown)
         let status = AudioHardwareCreateProcessTap(description, &id)
         guard status == noErr, id != kAudioObjectUnknown else {
-            throw CoreAudioError.status(status, "No se pudo crear la captura de audio del sistema. Comprueba el permiso en Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla y audio del sistema")
+            throw CoreAudioError.status(status, "Could not create the system audio capture. Check the permission in System Settings → Privacy & Security → Screen & System Audio Recording")
         }
         tapID = id
         uuid = description.uuid
@@ -67,7 +67,7 @@ final class AggregateDevice {
         var aggregateID = AudioObjectID(kAudioObjectUnknown)
         let status = AudioHardwareCreateAggregateDevice(description as CFDictionary, &aggregateID)
         guard status == noErr, aggregateID != kAudioObjectUnknown else {
-            throw CoreAudioError.status(status, "No se pudo crear el dispositivo agregado")
+            throw CoreAudioError.status(status, "Could not create the aggregate device")
         }
         id = aggregateID
     }

@@ -12,12 +12,12 @@ enum EngineError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .noOutputDevice: return "No hay ningún dispositivo de salida disponible."
-        case .inputDeviceNotFound: return "El dispositivo de entrada seleccionado ya no está disponible."
-        case .unsupportedStreamFormat: return "El dispositivo usa un formato de audio no compatible (se esperaba Float32)."
-        case .instantiationFailed(let name): return "No se pudo cargar el plugin \(name)."
-        case .pluginNotInstalled(let name): return "El plugin \(name) ya no está instalado."
-        case .microphoneDenied: return "Acceso al micrófono denegado. Actívalo en Ajustes del Sistema → Privacidad y seguridad → Micrófono."
+        case .noOutputDevice: return "No output device is available."
+        case .inputDeviceNotFound: return "The selected input device is no longer available."
+        case .unsupportedStreamFormat: return "The device uses an unsupported audio format (Float32 expected)."
+        case .instantiationFailed(let name): return "Could not load the plugin \(name)."
+        case .pluginNotInstalled(let name): return "The plugin \(name) is no longer installed."
+        case .microphoneDenied: return "Microphone access denied. Enable it in System Settings → Privacy & Security → Microphone."
         }
     }
 }
@@ -124,7 +124,7 @@ final class AudioEngineController {
             let systemTap = try SystemAudioTap(muteOriginal: settings.muteOriginal)
             tap = systemTap
             tapUUID = systemTap.uuid
-            sourceName = "Audio del sistema"
+            sourceName = "System audio"
         }
 
         let device = try AggregateDevice(output: output, input: inputDevice, tapUUID: tapUUID)
@@ -150,10 +150,10 @@ final class AudioEngineController {
         var status = AudioDeviceCreateIOProcIDWithBlock(&procID, device.id, nil) { _, inputData, _, outputData, outputTime in
             realtime.process(input: inputData, output: outputData, timestamp: outputTime)
         }
-        guard status == noErr, let procID else { throw CoreAudioError.status(status, "No se pudo crear el proceso de E/S") }
+        guard status == noErr, let procID else { throw CoreAudioError.status(status, "Could not create the audio I/O procedure") }
         ioProcID = procID
         status = AudioDeviceStart(device.id, procID)
-        guard status == noErr else { throw CoreAudioError.status(status, "No se pudo arrancar el dispositivo de audio") }
+        guard status == noErr else { throw CoreAudioError.status(status, "Could not start the audio device") }
 
         isRunning = true
         clock.isPlaying = true
@@ -197,18 +197,18 @@ final class AudioEngineController {
         var asbd = format.streamDescription.pointee
         let asbdSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         var status = AudioUnitSetProperty(au, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &asbd, asbdSize)
-        guard status == noErr else { lastError = "\(slot.name): formato de entrada rechazado (\(status))"; return }
+        guard status == noErr else { lastError = "\(slot.name): input format rejected (\(status))"; return }
         status = AudioUnitSetProperty(au, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &asbd, asbdSize)
-        guard status == noErr else { lastError = "\(slot.name): formato de salida rechazado (\(status))"; return }
+        guard status == noErr else { lastError = "\(slot.name): output format rejected (\(status))"; return }
         var maxFrames = UInt32(Self.maxFrames)
         AudioUnitSetProperty(au, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global, 0, &maxFrames, 4)
         var callback = AURenderCallbackStruct(inputProc: InputFeed.renderCallback, inputProcRefCon: feed.opaque)
         status = AudioUnitSetProperty(au, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &callback,
                                       UInt32(MemoryLayout<AURenderCallbackStruct>.size))
-        guard status == noErr else { lastError = "\(slot.name): no acepta entrada por callback (\(status))"; return }
+        guard status == noErr else { lastError = "\(slot.name): does not accept a render callback (\(status))"; return }
         clock.installV2HostCallbacks(on: au)
         status = AudioUnitInitialize(au)
-        guard status == noErr else { lastError = "\(slot.name): no se pudo inicializar (\(status))"; return }
+        guard status == noErr else { lastError = "\(slot.name): could not be initialised (\(status))"; return }
         slot.preparedSampleRate = sampleRate
     }
 
@@ -451,7 +451,7 @@ final class AudioEngineController {
         func next() {
             guard !pending.isEmpty else {
                 if !failures.isEmpty {
-                    lastError = "No se pudieron restaurar: " + failures.joined(separator: ", ")
+                    lastError = "Could not restore: " + failures.joined(separator: ", ")
                 }
                 if session.wasRunning { start() } else { notify() }
                 completion()

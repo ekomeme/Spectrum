@@ -52,7 +52,7 @@ enum CoreAudio {
         let status = withUnsafeMutablePointer(to: &value) { ptr in
             AudioObjectGetPropertyData(object, &addr, 0, nil, &size, ptr)
         }
-        guard status == noErr else { throw CoreAudioError.status(status, "No se pudo leer la propiedad \(fourCC(OSStatus(bitPattern: selector)))") }
+        guard status == noErr else { throw CoreAudioError.status(status, "Could not read property \(fourCC(OSStatus(bitPattern: selector)))") }
         return value
     }
 
@@ -62,14 +62,14 @@ enum CoreAudio {
         var addr = address(selector, scope: scope)
         var size: UInt32 = 0
         var status = AudioObjectGetPropertyDataSize(object, &addr, 0, nil, &size)
-        guard status == noErr else { throw CoreAudioError.status(status, "No se pudo leer el tamaño de la propiedad") }
+        guard status == noErr else { throw CoreAudioError.status(status, "Could not read property size") }
         let count = Int(size) / MemoryLayout<T>.stride
         guard count > 0 else { return [] }
         var values = [T](repeating: initial, count: count)
         status = values.withUnsafeMutableBytes { raw in
             AudioObjectGetPropertyData(object, &addr, 0, nil, &size, raw.baseAddress!)
         }
-        guard status == noErr else { throw CoreAudioError.status(status, "No se pudo leer la propiedad") }
+        guard status == noErr else { throw CoreAudioError.status(status, "Could not read property") }
         return values
     }
 
@@ -92,7 +92,7 @@ enum CoreAudio {
         let status = withUnsafePointer(to: &copy) { ptr in
             AudioObjectSetPropertyData(object, &addr, 0, nil, UInt32(MemoryLayout<T>.size), ptr)
         }
-        guard status == noErr else { throw CoreAudioError.status(status, "No se pudo escribir la propiedad \(fourCC(OSStatus(bitPattern: selector)))") }
+        guard status == noErr else { throw CoreAudioError.status(status, "Could not write property \(fourCC(OSStatus(bitPattern: selector)))") }
     }
 
     static func channelCount(_ device: AudioDeviceID, scope: AudioObjectPropertyScope) -> Int {
@@ -149,7 +149,7 @@ final class AudioDeviceManager {
             guard let uid = CoreAudio.readString(id, kAudioDevicePropertyDeviceUID) else { return nil }
             // Skip our own private aggregate devices if they ever leak into the list.
             if uid.hasPrefix(AggregateDevice.uidPrefix) { return nil }
-            let name = CoreAudio.readString(id, kAudioObjectPropertyName) ?? "Dispositivo \(id)"
+            let name = CoreAudio.readString(id, kAudioObjectPropertyName) ?? "Device \(id)"
             let inputs = CoreAudio.channelCount(id, scope: kAudioObjectPropertyScopeInput)
             let outputs = CoreAudio.channelCount(id, scope: kAudioObjectPropertyScopeOutput)
             guard inputs > 0 || outputs > 0 else { return nil }

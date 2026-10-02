@@ -145,6 +145,45 @@ if let index = CommandLine.arguments.firstIndex(of: "--render-probe"), index + 1
     _exit(0)
 }
 
+// Diagnostic mode: `Spectrum --ui-snapshot <dir>` renders the main window (both tabs) to PNG files.
+if let index = CommandLine.arguments.firstIndex(of: "--ui-snapshot"), index + 1 < CommandLine.arguments.count {
+    let dir = URL(fileURLWithPath: CommandLine.arguments[index + 1])
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    let controller = AudioEngineController()
+    let window = MainWindowController(engine: controller)
+    window.showWindow(nil)
+    if let component = PluginCatalog.effects().first(where: { $0.name.lowercased().contains("pro-q") }) {
+        var done = false
+        controller.addPlugin(component) { _ in done = true }
+        while !done { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+    }
+    if let component = PluginCatalog.effects().first(where: { $0.name.lowercased().contains("metricab") }) {
+        var done = false
+        controller.addPlugin(component) { _ in done = true }
+        while !done { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+    }
+    func snap(_ name: String) {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        guard let win = window.window, let frameView = win.contentView?.superview else { return }
+        frameView.layoutSubtreeIfNeeded()
+        guard let rep = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds) else { return }
+        frameView.cacheDisplay(in: frameView.bounds, to: rep)
+        if let png = rep.representation(using: .png, properties: [:]) {
+            try? png.write(to: dir.appendingPathComponent(name + ".png"))
+            print("snapshot \(name): \(Int(frameView.bounds.width))x\(Int(frameView.bounds.height))")
+        }
+    }
+    snap("plugin-chain")
+    window.selectTabForSnapshot(.audioSettings)
+    snap("audio-settings")
+    window.selectTabForSnapshot(.pluginChain)
+    for slot in controller.slots { controller.removePlugin(slot) }
+    RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+    _exit(0)
+}
+
 // Diagnostic mode: `Spectrum --ui-smoke` builds the real window, loads Pro-Q 4 into the list and exits.
 if CommandLine.arguments.contains("--ui-smoke") {
     let app = NSApplication.shared
