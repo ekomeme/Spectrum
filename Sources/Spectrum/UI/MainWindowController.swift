@@ -222,18 +222,26 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         emptyLabel.textColor = .secondaryLabelColor
         emptyLabel.alignment = .center
 
+        let handleColumn = NSTableColumn(identifier: .init("handle"))
+        handleColumn.title = ""
+        handleColumn.width = 34
+        handleColumn.resizingMask = []
         let pluginColumn = NSTableColumn(identifier: .init("plugin"))
         pluginColumn.title = "Plugin"
         pluginColumn.resizingMask = .autoresizingMask
+        let openColumn = NSTableColumn(identifier: .init("open"))
+        openColumn.title = ""
+        openColumn.width = 70
+        openColumn.resizingMask = []
         let bypassColumn = NSTableColumn(identifier: .init("bypass"))
         bypassColumn.title = "Bypass"
         bypassColumn.width = 70
         bypassColumn.resizingMask = []
-        let orderColumn = NSTableColumn(identifier: .init("order"))
-        orderColumn.title = "Order"
-        orderColumn.width = 86
-        orderColumn.resizingMask = []
-        for column in [pluginColumn, bypassColumn, orderColumn] { pluginTable.addTableColumn(column) }
+        let removeColumn = NSTableColumn(identifier: .init("remove"))
+        removeColumn.title = ""
+        removeColumn.width = 44
+        removeColumn.resizingMask = []
+        for column in [handleColumn, pluginColumn, openColumn, bypassColumn, removeColumn] { pluginTable.addTableColumn(column) }
         pluginTable.dataSource = self
         pluginTable.delegate = self
         pluginTable.style = .plain
@@ -243,7 +251,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         pluginTable.selectionHighlightStyle = .none
         pluginTable.backgroundColor = .clear
         pluginTable.gridStyleMask = []
-        pluginTable.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+        pluginTable.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         pluginTable.allowsColumnReordering = false
         pluginTable.allowsColumnResizing = false
         pluginTable.registerForDraggedTypes([Self.dragType])
@@ -404,6 +412,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         guard row < engine.slots.count, let column = tableColumn?.identifier.rawValue else { return nil }
         let slot = engine.slots[row]
         switch column {
+        case "handle":
+            let handle = NSImageView(image: NSImage(systemSymbolName: "line.3.horizontal", accessibilityDescription: "Drag to reorder")!)
+            handle.contentTintColor = .tertiaryLabelColor
+            handle.toolTip = "Drag to reorder"
+            return cell([handle], spacing: 0, leading: 12)
         case "plugin":
             let name = NSTextField(labelWithString: slot.name)
             name.font = .systemFont(ofSize: 13)
@@ -415,12 +428,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             names.orientation = .vertical
             names.alignment = .leading
             names.spacing = 1
+            return cell([names], spacing: 0, leading: 4)
+        case "open":
             let open = NSButton(title: "Open", target: self, action: #selector(openPluginUI(_:)))
             open.tag = row
             open.bezelStyle = .rounded
             open.controlSize = .small
             open.font = .systemFont(ofSize: 11)
-            return cell([names, open], spacing: 10, leading: 14)
+            return cell([open], spacing: 0, leading: 4)
         case "bypass":
             let bypassSwitch = NSSwitch()
             bypassSwitch.controlSize = .small
@@ -430,16 +445,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             bypassSwitch.action = #selector(toggleBypass(_:))
             return cell([bypassSwitch], spacing: 0, leading: 10)
         default:
-            let handle = NSImageView(image: NSImage(systemSymbolName: "line.3.horizontal", accessibilityDescription: "Drag to reorder")!)
-            handle.contentTintColor = .tertiaryLabelColor
-            handle.toolTip = "Drag to reorder"
             let remove = NSButton(image: NSImage(systemSymbolName: "minus.circle", accessibilityDescription: "Remove")!, target: self, action: #selector(removePlugin(_:)))
             remove.tag = row
             remove.bezelStyle = .rounded
             remove.isBordered = false
             remove.contentTintColor = .secondaryLabelColor
             remove.toolTip = "Remove from chain"
-            return cell([handle, remove], spacing: 12, leading: 12)
+            return cell([remove], spacing: 0, leading: 8)
         }
     }
 
