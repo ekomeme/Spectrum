@@ -48,6 +48,8 @@ final class AudioEngineController {
     private var processFormat: AVAudioFormat?
     private var meterTimer: Timer?
     private var restartWork: DispatchWorkItem?
+    /// Removed plugins are kept alive briefly so their editor views can finish tearing down.
+    private var retiring: [PluginSlot] = []
     private static let maxFrames = 4096
 
     init() {
@@ -293,6 +295,10 @@ final class AudioEngineController {
         engine.disconnectNodeInput(slot.unit)
         engine.disconnectNodeOutput(slot.unit)
         engine.detach(slot.unit)
+        retiring.append(slot)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            self?.retiring.removeAll { $0.id == slot.id }
+        }
         rewireChain()
         notify()
     }
@@ -328,6 +334,62 @@ final class AudioEngineController {
     }
 
     // MARK: - Diagnostics
+
+    /// Compares "add while running" vs "restore from session then start" for one plugin.
+    func transportProbe(component: AVAudioUnitComponent, restoreState: Data?, sourceUID: String?, outputUID: String?) -> String {
+        settings.sourceDeviceUID = sourceUID
+        settings.outputDeviceUID = outputUID
+        var lines: [String] = []
+        func wait(_ seconds: Double) { let until = Date().addingTimeInterval(seconds); while Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) } }
+        func load(then: @escaping (PluginSlot) -> Void) {
+            instantiate(component.audioComponentDescription, name: component.name, manufacturer: component.manufacturerName) { result in
+                if case .success(let slot) = result { then(slot) } else { lines.append("  fallo al instanciar"); }
+            }
+        }
+        func report(_ label: String, _ slot: PluginSlot) {
+            let c = clock.callCounts
+            lines.append("  \(label): v3 transport \(c[0]) · v3 musical \(c[1]) · v2 transport \(c[2]) · v2 beatTempo \(c[3]) · v2 timeLoc \(c[4]) · hostCallbacks propios: \(clock.hostCallbacksInstalled(on: slot.unit.audioUnit)) · bypass \(slot.bypassed)")
+        }
+
+        lines.append("A) añadir en caliente (motor ya en marcha)")
+        do { try startInternal() } catch { return "Error al arrancar: \(error.localizedDescription)" }
+        var slotA: PluginSlot?
+        load { slot in self.engine.attach(slot.unit); self.slots.append(slot); self.rewireChain(); slotA = slot }
+        while slotA == nil { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        wait(1.5)
+        if let slotA { report("tras 1.5 s", slotA) }
+        if let slotA { removePlugin(slotA) }
+        stopInternal()
+
+        lines.append("B) restaurar desde sesión (fullState) y luego arrancar")
+        var slotB: PluginSlot?
+        load { slot in
+            slot.restore(state: restoreState)
+            self.engine.attach(slot.unit); self.slots.append(slot); slotB = slot
+        }
+        while slotB == nil { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        let before = clock.callCounts
+        do { try startInternal() } catch { return lines.joined(separator: "\n") + "\nError al arrancar: \(error.localizedDescription)" }
+        wait(1.5)
+        if let slotB {
+            let c = clock.callCounts
+            lines.append("  deltas tras 1.5 s: v3 transport \(c[0]-before[0]) · v3 musical \(c[1]-before[1]) · v2 transport \(c[2]-before[2]) · v2 beatTempo \(c[3]-before[3]) · v2 timeLoc \(c[4]-before[4]) · hostCallbacks propios: \(clock.hostCallbacksInstalled(on: slotB.unit.audioUnit)) · bypass \(slotB.bypassed) · estado restaurado: \(restoreState?.count ?? 0) bytes")
+        }
+
+        lines.append("C) mismo plugin restaurado, SIN fullState")
+        if let slotB { removePlugin(slotB) }
+        stopInternal()
+        var slotC: PluginSlot?
+        load { slot in self.engine.attach(slot.unit); self.slots.append(slot); slotC = slot }
+        while slotC == nil { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        let before2 = clock.callCounts
+        do { try startInternal() } catch { return lines.joined(separator: "\n") }
+        wait(1.5)
+        let c2 = clock.callCounts
+        lines.append("  deltas tras 1.5 s: v3 transport \(c2[0]-before2[0]) · v3 musical \(c2[1]-before2[1]) · v2 transport \(c2[2]-before2[2]) · v2 beatTempo \(c2[3]-before2[3]) · v2 timeLoc \(c2[4]-before2[4])")
+        stopInternal()
+        return lines.joined(separator: "\n")
+    }
 
     /// Runs the real signal path for a moment and reports what happened (used by `Spectrum --selftest`).
     func selfTest(sourceUID: String?, outputUID: String?, seconds: Double, toneAmplitude: Float = 0,

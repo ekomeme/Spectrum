@@ -365,6 +365,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         let controller = PluginWindowController(slot: slot)
+        controller.onClose = { [weak slot] in slot?.windowController = nil }
         slot.windowController = controller
         controller.showWindow(nil)
     }

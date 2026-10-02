@@ -1,6 +1,8 @@
 import AppKit
 import AVFoundation
 
+setvbuf(stdout, nil, _IONBF, 0)
+
 // Diagnostic mode: `Spectrum --list` prints devices and AU effects without opening a window.
 if CommandLine.arguments.contains("--list") {
     print("== Dispositivos de audio ==")
@@ -60,6 +62,22 @@ if let index = CommandLine.arguments.firstIndex(of: "--selftest") {
     exit(0)
 }
 
+// Diagnostic mode: `Spectrum --probe-transport "<nombre>" <inputUID> <outputUID>` compares hot-add vs session-restore.
+if let index = CommandLine.arguments.firstIndex(of: "--probe-transport"), index + 3 < CommandLine.arguments.count {
+    let query = CommandLine.arguments[index + 1].lowercased()
+    guard let component = PluginCatalog.effects().first(where: { $0.name.lowercased().contains(query) }) else { print("sin plugin"); exit(1) }
+    let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+    let url = base.appendingPathComponent("Spectrum/session.plist")
+    var state: Data? = nil
+    if let data = try? Data(contentsOf: url), let session = try? PropertyListDecoder().decode(Session.self, from: data) {
+        state = session.plugins.first(where: { $0.name == component.name })?.state
+    }
+    let controller = AudioEngineController()
+    print(controller.transportProbe(component: component, restoreState: state,
+                                    sourceUID: CommandLine.arguments[index + 2], outputUID: CommandLine.arguments[index + 3]))
+    exit(0)
+}
+
 // Diagnostic mode: `Spectrum --ui-smoke` builds the real window, loads Pro-Q 4 into the list and exits.
 if CommandLine.arguments.contains("--ui-smoke") {
     let app = NSApplication.shared
@@ -67,7 +85,8 @@ if CommandLine.arguments.contains("--ui-smoke") {
     let controller = AudioEngineController()
     let window = MainWindowController(engine: controller)
     window.showWindow(nil)
-    guard let component = PluginCatalog.effects().first(where: { $0.name.lowercased().contains("pro-q") }) else { print("sin Pro-Q"); exit(1) }
+    let wanted = (CommandLine.arguments.firstIndex(of: "--ui-smoke").flatMap { CommandLine.arguments.count > $0 + 1 ? CommandLine.arguments[$0 + 1] : nil } ?? "pro-q").lowercased()
+    guard let component = PluginCatalog.effects().first(where: { $0.name.lowercased().contains(wanted) }) else { print("sin plugin \(wanted)"); exit(1) }
     var done = false
     controller.addPlugin(component) { result in
         if case .failure(let error) = result { print("fallo: \(error.localizedDescription)"); exit(1) }
@@ -76,10 +95,25 @@ if CommandLine.arguments.contains("--ui-smoke") {
     while !done { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
     RunLoop.main.run(until: Date().addingTimeInterval(0.3))
     print("UI OK: \(controller.slots.count) plugin(s) en la lista, ventana \(window.window?.frame.size ?? .zero)")
+    // Open, close and reopen the plugin editor: both times it must be the plugin's own view.
+    if let slot = controller.slots.first {
+        for attempt in 1...3 {
+            let editor = PluginWindowController(slot: slot)
+            editor.showWindow(nil)
+            let delay = Double(ProcessInfo.processInfo.environment["SPECTRUM_UI_DELAY"] ?? "0.6") ?? 0.6
+            RunLoop.main.run(until: Date().addingTimeInterval(delay))
+            let viewClass = editor.window?.contentView?.subviews.first.map { String(describing: type(of: $0)) } ?? "nil"
+            print("  interfaz intento \(attempt): vista \(viewClass) · tamaño \(editor.window?.contentView?.frame.size ?? .zero) · genérica: \(editor.usedGenericView)")
+            editor.dispose()
+            RunLoop.main.run(until: Date().addingTimeInterval(max(0.2, delay / 2)))
+        }
+    }
     if let last = controller.slots.last { controller.removePlugin(last) }
     RunLoop.main.run(until: Date().addingTimeInterval(0.2))
     print("UI OK tras quitar: \(controller.slots.count) plugin(s)")
-    exit(0)
+    // Mirror the app's quit path: settle, then end without running plugin static destructors.
+    RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+    _exit(0)
 }
 
 let app = NSApplication.shared

@@ -27,9 +27,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return true
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
+    /// Some plugins (MetricAB among them) crash inside their own static destructors when the process exits
+    /// while their JUCE timer thread is alive. Hosts work around it by saving everything, stopping audio,
+    /// giving editors a moment to settle and then ending the process without running those destructors.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         engine.saveSession()
         engine.shutdown()
+        UserDefaults.standard.synchronize()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            _exit(0)
+        }
+        return .terminateLater
     }
 
     // MARK: - Show / hide
@@ -43,7 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func hideMainWindow() {
         mainWindowController?.window?.orderOut(nil)
-        for slot in engine.slots { slot.windowController?.window?.orderOut(nil) }
+        for slot in engine.slots { slot.windowController?.dispose() }
         NSApp.setActivationPolicy(.accessory)
     }
 
