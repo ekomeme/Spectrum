@@ -10,18 +10,43 @@ Mientras Spectrum está en marcha, el audio original de las demás apps se silen
 
 ## Requisitos
 
-- macOS 14.2 o superior (usa Core Audio *process taps*; no necesita BlackHole ni drivers virtuales).
-- Xcode Command Line Tools (`xcode-select --install`) para compilar.
-- Plugins AU instalados en `/Library/Audio/Plug-Ins/Components`.
+- **macOS 14.2 (Sonoma) o superior.** Usa Core Audio *process taps*, así que no necesita BlackHole ni drivers virtuales. Funciona en Apple Silicon e Intel.
+- **Plugins AU instalados** en `/Library/Audio/Plug-Ins/Components` (con su licencia activada en ese Mac).
+- Para compilar desde código: **Xcode Command Line Tools** (`xcode-select --install`). No hace falta Xcode completo.
 
-## Compilar y ejecutar
+## Instalar en otro Mac
+
+### Opción A: compilar desde el código (recomendada)
 
 ```bash
-./build.sh
-open build/Spectrum.app
+xcode-select --install          # solo la primera vez, si no están instaladas
+git clone https://github.com/ekomeme/Spectrum.git
+cd Spectrum
+./build.sh --install            # compila, firma ad-hoc y copia a /Applications
 ```
 
+Luego abre Spectrum desde Launchpad o Spotlight.
+
+### Opción B: descargar la app ya compilada
+
+En la pestaña **Releases** del repositorio hay un `Spectrum.zip` universal (Apple Silicon + Intel). Descomprímelo y arrastra `Spectrum.app` a Aplicaciones.
+
+Como la app está firmada ad-hoc y no notarizada, al descargarla de internet macOS la bloqueará la primera vez ("no se puede abrir porque no se puede verificar el desarrollador"). Dos formas de resolverlo:
+
+- Clic derecho sobre la app → **Abrir** → **Abrir** en el diálogo. Solo hace falta una vez.
+- O quitar la cuarentena desde la Terminal: `xattr -dr com.apple.quarantine /Applications/Spectrum.app`
+
+### Permisos
+
 La primera vez que pulses **Iniciar**, macOS pedirá permiso de **Grabación de audio del sistema** (y de **Micrófono** si eliges una entrada física). Acéptalos. Si los rechazaste por error: Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla y audio del sistema → activa Spectrum.
+
+## Compilar y ejecutar en desarrollo
+
+```bash
+./build.sh                 # build/Spectrum.app para este Mac
+./build.sh --universal --zip   # binario universal + zip para distribuir
+open build/Spectrum.app
+```
 
 > La app se firma *ad‑hoc*. Cada vez que recompilas cambia la firma y macOS puede volver a pedir el permiso. Si tienes un certificado de desarrollador puedes firmar con él:
 > `CODESIGN_IDENTITY="Apple Development: Tu Nombre (TEAMID)" ./build.sh`
@@ -35,6 +60,7 @@ La primera vez que pulses **Iniciar**, macOS pedirá permiso de **Grabación de 
 5. **Añadir plugin…**: busca "Pro-Q" y añádelo. Se abre su interfaz automáticamente; puedes reabrirla con **Interfaz**.
 6. Puedes encadenar varios plugins, reordenarlos (▲ ▼), hacer *bypass* o quitarlos.
 7. **Iniciar / Detener**.
+8. Al cerrar la ventana con la X, Spectrum sigue funcionando desde el icono de la barra de menús (forma de onda). Desde ahí puedes mostrar la ventana, iniciar/detener o salir.
 
 Al cerrar Spectrum se guarda la cadena de plugins con su estado completo (curva del EQ, presets…), los dispositivos elegidos y si estaba en marcha. Al abrirlo de nuevo se restaura todo. La sesión vive en `~/Library/Application Support/Spectrum/session.plist`.
 
