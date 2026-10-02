@@ -416,9 +416,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let editor = NSButton(title: "Editor", target: self, action: #selector(openPluginUI(_:)))
         editor.tag = index
         editor.bezelStyle = .rounded
-        let bypass = NSButton(checkboxWithTitle: "Bypass", target: self, action: #selector(toggleBypass(_:)))
-        bypass.tag = index
-        bypass.state = slot.bypassed ? .on : .off
+        let bypassLabel = NSTextField(labelWithString: "Bypass")
+        bypassLabel.font = .systemFont(ofSize: 12)
+        bypassLabel.textColor = .secondaryLabelColor
+        let bypassSwitch = NSSwitch()
+        bypassSwitch.controlSize = .small
+        bypassSwitch.tag = index
+        bypassSwitch.state = slot.bypassed ? .on : .off
+        bypassSwitch.target = self
+        bypassSwitch.action = #selector(toggleBypass(_:))
         let up = NSButton(image: NSImage(systemSymbolName: "chevron.up", accessibilityDescription: "Move up")!, target: self, action: #selector(movePluginUp(_:)))
         up.tag = index
         up.bezelStyle = .rounded
@@ -431,11 +437,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         remove.tag = index
         remove.bezelStyle = .rounded
 
-        let row = NSStackView(views: [number, names, editor, bypass, up, down, remove])
+        let row = NSStackView(views: [number, names, editor, bypassLabel, bypassSwitch, up, down, remove])
         row.orientation = .horizontal
         row.distribution = .fill
         row.alignment = .centerY
         row.spacing = 8
+        row.setCustomSpacing(4, after: bypassLabel)
+        names.setHuggingPriority(.init(1), for: .horizontal)
         row.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
         row.translatesAutoresizingMaskIntoConstraints = false
         return row
@@ -514,7 +522,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         controller.showWindow(nil)
     }
 
-    @objc private func toggleBypass(_ sender: NSButton) {
+    @objc private func toggleBypass(_ sender: NSSwitch) {
         guard sender.tag < engine.slots.count else { return }
         engine.setBypass(engine.slots[sender.tag], sender.state == .on)
     }
