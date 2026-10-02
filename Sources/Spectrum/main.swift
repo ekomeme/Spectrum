@@ -78,6 +78,73 @@ if let index = CommandLine.arguments.firstIndex(of: "--probe-transport"), index 
     exit(0)
 }
 
+// Diagnostic mode: `Spectrum --render-probe "<nombre>"` renders one block through the v3 renderBlock and the v2 API.
+if let index = CommandLine.arguments.firstIndex(of: "--render-probe"), index + 1 < CommandLine.arguments.count {
+    let query = CommandLine.arguments[index + 1].lowercased()
+    guard let component = PluginCatalog.effects().first(where: { $0.name.lowercased().contains(query) }) else { print("sin plugin"); exit(1) }
+    let group = DispatchGroup(); group.enter()
+    var unitOut: AVAudioUnit?
+    AVAudioUnit.instantiate(with: component.audioComponentDescription, options: []) { unit, _ in unitOut = unit; group.leave() }
+    group.wait()
+    guard let unit = unitOut else { print("no instanciado"); exit(1) }
+    let au = unit.auAudioUnit
+    let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
+    let frames = 256
+    let input = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096)!; input.frameLength = AVAudioFrameCount(frames)
+    let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096)!; output.frameLength = AVAudioFrameCount(frames)
+    for f in 0..<frames { input.floatChannelData![0][f] = 0.1; input.floatChannelData![1][f] = 0.1 }
+    var ts = AudioTimeStamp(); ts.mSampleTime = 0; ts.mHostTime = mach_absolute_time(); ts.mFlags = [.sampleTimeValid, .hostTimeValid]
+
+    print("\(component.manufacturerName) – \(component.name): buses de entrada \(au.inputBusses.count)")
+    for disableExtra in [false, true] {
+        do {
+            if au.renderResourcesAllocated { au.deallocateRenderResources() }
+            try au.inputBusses[0].setFormat(format); try au.outputBusses[0].setFormat(format)
+            if disableExtra { for i in 1..<au.inputBusses.count { au.inputBusses[i].isEnabled = false } }
+            au.maximumFramesToRender = 4096
+            try au.allocateRenderResources()
+        } catch { print("  allocate falló: \(error)"); continue }
+        var pulled: [Int] = []
+        let pull: AURenderPullInputBlock = { _, _, frameCount, bus, data in
+            pulled.append(bus)
+            let list = UnsafeMutableAudioBufferListPointer(data)
+            for i in 0..<list.count { list[i].mData = UnsafeMutableRawPointer(input.floatChannelData![i]); list[i].mDataByteSize = frameCount * 4 }
+            return noErr
+        }
+        var flags = AudioUnitRenderActionFlags()
+        var stamp = ts
+        output.frameLength = AVAudioFrameCount(frames)
+        let status = au.renderBlock(&flags, &stamp, AUAudioFrameCount(frames), 0, output.mutableAudioBufferList, pull)
+        print("  A) v3 renderBlock (extra buses deshabilitados=\(disableExtra)): status \(status) \(fourCC(status)) · buses pedidos \(pulled) · salida[0]=\(output.floatChannelData![0][10])")
+    }
+
+    // B) Classic v2 hosting: render callback on element 0, AudioUnitRender on output element 0.
+    let v2 = unit.audioUnit
+    if au.renderResourcesAllocated { au.deallocateRenderResources() }
+    var asbd = format.streamDescription.pointee
+    var st = AudioUnitSetProperty(v2, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &asbd, UInt32(MemoryLayout<AudioStreamBasicDescription>.size)); print("  B) set input format: \(st)")
+    st = AudioUnitSetProperty(v2, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &asbd, UInt32(MemoryLayout<AudioStreamBasicDescription>.size)); print("  B) set output format: \(st)")
+    var maxFrames: UInt32 = 4096
+    AudioUnitSetProperty(v2, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global, 0, &maxFrames, 4)
+    final class Box { let input: AVAudioPCMBuffer; var pulls = 0; init(_ i: AVAudioPCMBuffer) { input = i } }
+    let box = Box(input)
+    var callback = AURenderCallbackStruct(inputProc: { refCon, _, _, bus, frameCount, data in
+        let box = Unmanaged<Box>.fromOpaque(refCon).takeUnretainedValue(); box.pulls += 1
+        guard let data else { return noErr }
+        let list = UnsafeMutableAudioBufferListPointer(data)
+        for i in 0..<list.count { list[i].mData = UnsafeMutableRawPointer(box.input.floatChannelData![i]); list[i].mDataByteSize = frameCount * 4 }
+        return noErr
+    }, inputProcRefCon: Unmanaged.passUnretained(box).toOpaque())
+    st = AudioUnitSetProperty(v2, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &callback, UInt32(MemoryLayout<AURenderCallbackStruct>.size)); print("  B) set render callback: \(st)")
+    st = AudioUnitInitialize(v2); print("  B) initialize: \(st)")
+    var flags = AudioUnitRenderActionFlags(); var stamp = ts
+    output.floatChannelData![0][10] = -1
+    st = AudioUnitRender(v2, &flags, &stamp, 0, UInt32(frames), output.mutableAudioBufferList)
+    print("  B) v2 AudioUnitRender: status \(st) \(fourCC(st)) · pulls \(box.pulls) · salida[0]=\(output.floatChannelData![0][10])")
+    AudioUnitUninitialize(v2)
+    _exit(0)
+}
+
 // Diagnostic mode: `Spectrum --ui-smoke` builds the real window, loads Pro-Q 4 into the list and exits.
 if CommandLine.arguments.contains("--ui-smoke") {
     let app = NSApplication.shared

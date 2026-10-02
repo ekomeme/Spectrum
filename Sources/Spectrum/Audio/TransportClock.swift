@@ -102,7 +102,7 @@ final class TransportClock {
         }
     }
 
-    private func installV2HostCallbacks(on audioUnit: AudioUnit) {
+    func installV2HostCallbacks(on audioUnit: AudioUnit) {
         let userData = Unmanaged.passUnretained(self).toOpaque()
         var info = HostCallbackInfo(
             hostUserData: userData,

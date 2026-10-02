@@ -10,6 +10,8 @@ final class PluginSlot {
     let unit: AVAudioUnit
     let supportsStereo: Bool
     var windowController: PluginWindowController?
+    /// Sample rate the render resources were allocated for (0 = not allocated).
+    var preparedSampleRate: Double = 0
 
     init(unit: AVAudioUnit, name: String, manufacturer: String, processFormat: AVAudioFormat) {
         self.unit = unit
@@ -20,8 +22,17 @@ final class PluginSlot {
     }
 
     var bypassed: Bool {
-        get { unit.auAudioUnit.shouldBypassEffect }
-        set { unit.auAudioUnit.shouldBypassEffect = newValue }
+        get {
+            var value: UInt32 = 0
+            var size: UInt32 = 4
+            let status = AudioUnitGetProperty(unit.audioUnit, kAudioUnitProperty_BypassEffect, kAudioUnitScope_Global, 0, &value, &size)
+            return status == noErr ? value != 0 : unit.auAudioUnit.shouldBypassEffect
+        }
+        set {
+            var value: UInt32 = newValue ? 1 : 0
+            AudioUnitSetProperty(unit.audioUnit, kAudioUnitProperty_BypassEffect, kAudioUnitScope_Global, 0, &value, 4)
+            unit.auAudioUnit.shouldBypassEffect = newValue
+        }
     }
 
     var displayName: String { "\(manufacturer) – \(name)" }
