@@ -99,3 +99,23 @@ Sources/Spectrum/
 Resources/Info.plist, AppIcon.icns
 build.sh                          Compila y crea build/Spectrum.app
 ```
+
+## Contribuir
+
+Las contribuciones son bienvenidas. Si encuentras un error o quieres proponer una mejora:
+
+1. Abre un *issue* describiendo el problema o la idea (incluye versión de macOS, dispositivo de audio y plugin si aplica).
+2. Para cambios de código, haz un *fork*, crea una rama y envía un *pull request* contra `main`.
+3. Antes de enviar, comprueba que compila y que los modos de diagnóstico pasan:
+
+```bash
+./build.sh
+.build/release/Spectrum --ui-smoke
+.build/release/Spectrum --selftest <uidEntrada> <uidSalida> --tone --add-late
+```
+
+Ideas pendientes: presets de cadena completa, atajos de teclado globales para bypass, medidor de latencia total, soporte de plugins VST3 vía wrapper.
+
+## Licencia
+
+[MIT](LICENSE). Spectrum no incluye ni distribuye ningún plugin; FabFilter, Pro‑Q y el resto de nombres citados son marcas de sus respectivos propietarios y se mencionan solo como ejemplo de uso.
