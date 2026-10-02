@@ -1,121 +1,135 @@
 # Spectrum
 
-Host de plugins Audio Unit para macOS que escucha **el audio del sistema** (o cualquier entrada de audio), lo pasa en tiempo real por una cadena de plugins AU (por ejemplo FabFilter Pro‑Q 4) y lo reproduce por la salida que elijas. Así puedes usar Pro‑Q 4 "stand alone" sobre Spotify, YouTube, Logic, lo que sea.
+A real-time Audio Unit host for macOS that listens to **your system audio** (or any audio input), runs it through a chain of AU plugins such as FabFilter Pro‑Q 4 or ADPTR MetricAB, and plays the result through the output of your choice. Use your favourite analyzers, EQs and limiters "stand-alone" on top of Spotify, YouTube, your DAW, anything.
 
 ```
-Otras apps ──► Core Audio tap ──► Spectrum ──► Pro‑Q 4 ──► (más plugins) ──► Altavoces / Auriculares
+Other apps ──► Core Audio tap ──► Spectrum ──► Pro‑Q 4 ──► (more plugins) ──► Speakers / Headphones
 ```
 
-Mientras Spectrum está en marcha, el audio original de las demás apps se silencia (opcional) y solo oyes la señal procesada. Al detener Spectrum o cerrarlo, todo vuelve a la normalidad.
+While Spectrum is running, the original output of the other apps is muted (optional) so you only hear the processed signal. Stop or quit Spectrum and everything returns to normal.
 
-## Requisitos
+## Requirements
 
-- **macOS 14.2 (Sonoma) o superior.** Usa Core Audio *process taps*, así que no necesita BlackHole ni drivers virtuales. Funciona en Apple Silicon e Intel.
-- **Plugins AU instalados** en `/Library/Audio/Plug-Ins/Components` (con su licencia activada en ese Mac).
-- Para compilar desde código: **Xcode Command Line Tools** (`xcode-select --install`). No hace falta Xcode completo.
+- **macOS 14.2 (Sonoma) or later.** Spectrum uses the native Core Audio *process tap* API, so it needs no BlackHole or virtual drivers. Apple Silicon and Intel are both supported.
+- **AU plugins installed** in `/Library/Audio/Plug-Ins/Components` (and licensed on that Mac).
+- To build from source: the **Xcode Command Line Tools** (`xcode-select --install`). Full Xcode is not required.
 
-## Instalar en otro Mac
+## Install
 
-### Opción A: compilar desde el código (recomendada)
+### Option A: build from source (recommended)
 
 ```bash
-xcode-select --install          # solo la primera vez, si no están instaladas
+xcode-select --install          # first time only
 git clone https://github.com/ekomeme/Spectrum.git
 cd Spectrum
-./build.sh --install            # compila, firma ad-hoc y copia a /Applications
+./build.sh --install            # builds, ad-hoc signs and copies to /Applications
 ```
 
-Luego abre Spectrum desde Launchpad o Spotlight.
+Then launch Spectrum from Launchpad or Spotlight.
 
-### Opción B: descargar la app ya compilada
+### Option B: download the prebuilt app
 
-En la pestaña **Releases** del repositorio hay un `Spectrum.zip` universal (Apple Silicon + Intel). Descomprímelo y arrastra `Spectrum.app` a Aplicaciones.
+The **Releases** tab has a universal `Spectrum.zip` (Apple Silicon + Intel). Unzip it and drag `Spectrum.app` to Applications.
 
-Como la app está firmada ad-hoc y no notarizada, al descargarla de internet macOS la bloqueará la primera vez ("no se puede abrir porque no se puede verificar el desarrollador"). Dos formas de resolverlo:
+The app is ad-hoc signed and not notarized, so macOS will block it the first time you open a downloaded copy ("cannot be opened because the developer cannot be verified"). Either:
 
-- Clic derecho sobre la app → **Abrir** → **Abrir** en el diálogo. Solo hace falta una vez.
-- O quitar la cuarentena desde la Terminal: `xattr -dr com.apple.quarantine /Applications/Spectrum.app`
+- Try to open it once, then go to System Settings → Privacy & Security and click **Open Anyway**, or
+- Remove the quarantine flag from Terminal: `xattr -dr com.apple.quarantine /Applications/Spectrum.app`
 
-### Permisos
+### Permissions
 
-La primera vez que pulses **Iniciar**, macOS pedirá permiso de **Grabación de audio del sistema** (y de **Micrófono** si eliges una entrada física). Acéptalos. Si los rechazaste por error: Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla y audio del sistema → activa Spectrum.
+The first time you press **Start**, macOS asks for **System Audio Recording** permission (and **Microphone** if you choose a hardware input). Accept them. If you declined by mistake: System Settings → Privacy & Security → Screen & System Audio Recording → enable Spectrum.
 
-## Compilar y ejecutar en desarrollo
+> Each rebuild changes the ad-hoc signature, so macOS may ask for the permission again after updating. If you have a developer certificate you can sign with it:
+> `CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)" ./build.sh`
+
+## Usage
+
+1. **Source**: "System audio (all apps)" or a specific input device (microphone, interface, BlackHole…).
+2. **Output**: the device you want to listen on. It can differ from the system default.
+3. **Buffer**: 64–1024 frames. Smaller means less latency and more CPU; 256 is a good default.
+4. **Mute original audio**: with the system-audio source, silences the other apps' direct output so you only hear the processed path. Turn it off to hear both.
+5. **Add plugin…**: search for "Pro-Q" and add it. Its editor opens automatically; reopen it any time with **Interface**.
+6. Chain several plugins, reorder them (▲ ▼), bypass or remove them.
+7. **Start / Stop**.
+8. Closing the main window with the X keeps Spectrum running from the menu bar icon (waveform). From there you can show the window, start/stop or quit.
+
+On quit, Spectrum saves the plugin chain with each plugin's full state (EQ curves, presets…), the selected devices and whether it was running, and restores all of it on the next launch. The session lives in `~/Library/Application Support/Spectrum/session.plist`.
+
+The UI is currently in Spanish; an English localisation is a welcome contribution.
+
+## How it works
+
+- `SystemAudioTap` creates a global stereo *process tap* (`CATapDescription`) that excludes Spectrum's own process, so the processed signal is never captured again (no feedback). With `muteBehavior = .mutedWhenTapped` the system silences the original audio while the tap is active.
+- `AggregateDevice` builds a private aggregate device with the output device as clock master plus the tap (or the chosen input device). One device for input and output means no clock drift.
+- `AudioEngineController` opens an `IOProc` on that device. On every callback `RealtimeRenderer` de-interleaves the input, renders the plugin chain in series through the classic `AudioUnitRender` API with the device's real timestamp (sample time and host time), and writes the result into the first two output channels. Total latency is one buffer plus whatever the plugins add.
+- Plugins are loaded in-process with `AVAudioUnit.instantiate`, initialised once and kept initialised across stop/start (only a sample-rate change re-initialises them). Their editors are created through `kAudioUnitProperty_CocoaUI` on every open, with `requestViewController` and `AUGenericView` as fallbacks.
+- `TransportClock` answers host-callback queries with "playing", a monotonic sample position and a fixed tempo; analyser plugins freeze their displays without it.
+
+### Things that did not work (so you don't retry them)
+
+- Pointing `AVAudioEngine.inputNode` at an aggregate device: the engine keeps reporting zero input channels.
+- `AVAudioEngine` in manual rendering mode: it re-initialises every plugin on each stop/start, which freezes some analysers.
+- `AUAudioUnit.renderBlock` for hosting v2 plugins: the bridge returns `kAudioUnitErr_NoConnection` for plugins with a side-chain bus (Pro‑Q 4, Pro‑L 2) and never pulls input.
+- Letting the process exit normally with certain plugins loaded: MetricAB crashes in its own static destructors, so Spectrum saves the session and ends with `_exit(0)`.
+
+## Diagnostics from the terminal
 
 ```bash
-./build.sh                 # build/Spectrum.app para este Mac
-./build.sh --universal --zip   # binario universal + zip para distribuir
-open build/Spectrum.app
+.build/release/Spectrum --list                          # audio devices and installed AU effects
+.build/release/Spectrum --probe "pro-q"                 # instantiate a plugin, check format/UI/state
+.build/release/Spectrum --render-probe "pro-q"          # render one block via v3 renderBlock and v2 AudioUnitRender
+.build/release/Spectrum --selftest <inUID> <outUID> [--with-proq] [--tone] [--add-late]
+.build/release/Spectrum --probe-transport "metricab" <inUID> <outUID>
+.build/release/Spectrum --ui-smoke "metricab"           # open/close the editor three times
 ```
 
-> La app se firma *ad‑hoc*. Cada vez que recompilas cambia la firma y macOS puede volver a pedir el permiso. Si tienes un certificado de desarrollador puedes firmar con él:
-> `CODESIGN_IDENTITY="Apple Development: Tu Nombre (TEAMID)" ./build.sh`
+`--selftest` runs the real signal path for two seconds, hot-adds and removes Pro‑Q 4, cycles stop/start and reports callbacks, channels, failed renders and output peak. `--tone` replaces the input with a −34 dB sine to verify the whole path.
 
-## Uso
-
-1. **Fuente**: "Audio del sistema (todas las apps)" o un dispositivo de entrada concreto (micrófono, interfaz, BlackHole…).
-2. **Salida**: el dispositivo por el que quieres escuchar. Puede ser distinto del predeterminado del sistema.
-3. **Buffer**: 64–1024 frames. Menor = menos latencia, más CPU. 256 va bien en general.
-4. **Silenciar el audio original**: con la fuente "Audio del sistema", silencia el sonido directo de las otras apps para que solo oigas la señal procesada. Desactívalo si prefieres oír ambas.
-5. **Añadir plugin…**: busca "Pro-Q" y añádelo. Se abre su interfaz automáticamente; puedes reabrirla con **Interfaz**.
-6. Puedes encadenar varios plugins, reordenarlos (▲ ▼), hacer *bypass* o quitarlos.
-7. **Iniciar / Detener**.
-8. Al cerrar la ventana con la X, Spectrum sigue funcionando desde el icono de la barra de menús (forma de onda). Desde ahí puedes mostrar la ventana, iniciar/detener o salir.
-
-Al cerrar Spectrum se guarda la cadena de plugins con su estado completo (curva del EQ, presets…), los dispositivos elegidos y si estaba en marcha. Al abrirlo de nuevo se restaura todo. La sesión vive en `~/Library/Application Support/Spectrum/session.plist`.
-
-## Cómo funciona
-
-- `SystemAudioTap` crea un *process tap* global estéreo (`CATapDescription`) que excluye al propio proceso de Spectrum, para que la señal procesada nunca se vuelva a capturar (sin realimentación). Con `muteBehavior = .mutedWhenTapped` el sistema silencia el audio original mientras el tap está activo.
-- `AggregateDevice` construye un dispositivo agregado privado con el dispositivo de salida como reloj, más el tap (o el dispositivo de entrada elegido). Un solo dispositivo para entrada y salida = sin deriva entre relojes.
-- `AudioEngineController` abre un `IOProc` sobre ese dispositivo y usa `AVAudioEngine` en modo de renderizado manual *realtime*: en cada callback, `RealtimeRenderer` deinterlea la entrada, renderiza la cadena `inputNode → mixer → [AU…] → mainMixer → outputNode` y escribe el resultado en los dos primeros canales de salida (los del dispositivo elegido). Latencia total ≈ un buffer + la latencia propia de los plugins.
-- Los plugins se cargan en proceso con `AVAudioUnit.instantiate` y su interfaz se obtiene con `AUAudioUnit.requestViewController` (vista genérica como respaldo). La ventana sigue los cambios de tamaño del plugin.
-
-## Diagnóstico desde terminal
-
-```bash
-.build/release/Spectrum --list                     # dispositivos y plugins AU instalados
-.build/release/Spectrum --probe "pro-q"            # instancia un plugin y comprueba formato/UI/estado
-.build/release/Spectrum --selftest <uidEntrada> <uidSalida> [--with-proq] [--tone]
-```
-
-`--selftest` arranca la cadena real durante dos segundos y reporta callbacks, canales y pico de salida. Con `--tone` sustituye la entrada por un tono a −34 dB para verificar el recorrido completo.
-
-## Estructura
+## Project layout
 
 ```
 Sources/Spectrum/
-  main.swift                      Entrada y modos de diagnóstico
-  AppDelegate.swift               Menús, ciclo de vida, guardado de sesión
-  Audio/AudioDevice.swift         Enumeración de dispositivos y helpers de Core Audio
-  Audio/SystemAudioTap.swift      Process tap + dispositivo agregado
-  Audio/RealtimeRenderer.swift    Puente IOProc ↔ AVAudioEngine (hilo de tiempo real)
-  Audio/AudioEngineController.swift  Grafo, plugins, persistencia
-  Audio/PluginCatalog.swift       Listado de AU
-  Audio/PluginSlot.swift          Un plugin cargado + modelos de sesión
-  UI/MainWindowController.swift   Panel de control
-  UI/PluginPickerController.swift Selector de plugins con búsqueda
-  UI/PluginWindowController.swift Ventana con la interfaz del plugin
+  main.swift                         Entry point and diagnostic modes
+  AppDelegate.swift                  Menus, menu bar item, lifecycle, session save
+  Audio/AudioDevice.swift            Device enumeration and Core Audio helpers
+  Audio/SystemAudioTap.swift         Process tap + aggregate device
+  Audio/RealtimeRenderer.swift       IOProc → plugin chain (realtime thread)
+  Audio/AudioEngineController.swift  Devices, chain management, persistence
+  Audio/TransportClock.swift         Host callbacks (transport/tempo) for plugins
+  Audio/PluginCatalog.swift          AU listing
+  Audio/PluginSlot.swift             One loaded plugin + session models
+  UI/MainWindowController.swift      Control panel
+  UI/PluginPickerController.swift    Searchable plugin picker
+  UI/PluginWindowController.swift    Plugin editor window
 Resources/Info.plist, AppIcon.icns
-build.sh                          Compila y crea build/Spectrum.app
+build.sh                             Builds and packages build/Spectrum.app
 ```
 
-## Contribuir
+## Build for development
 
-Las contribuciones son bienvenidas. Si encuentras un error o quieres proponer una mejora:
+```bash
+./build.sh                     # build/Spectrum.app for this Mac
+./build.sh --universal --zip   # universal binary + zip for distribution
+open build/Spectrum.app
+```
 
-1. Abre un *issue* describiendo el problema o la idea (incluye versión de macOS, dispositivo de audio y plugin si aplica).
-2. Para cambios de código, haz un *fork*, crea una rama y envía un *pull request* contra `main`.
-3. Antes de enviar, comprueba que compila y que los modos de diagnóstico pasan:
+## Contributing
+
+Contributions are welcome. If you find a bug or want to propose an improvement:
+
+1. Open an *issue* describing the problem or idea (include macOS version, audio device and plugin if relevant).
+2. For code changes, fork the repo, create a branch and open a *pull request* against `main`.
+3. Before submitting, make sure it builds and the diagnostics pass:
 
 ```bash
 ./build.sh
-.build/release/Spectrum --ui-smoke
-.build/release/Spectrum --selftest <uidEntrada> <uidSalida> --tone --add-late
+.build/release/Spectrum --ui-smoke "pro-q"
+.build/release/Spectrum --selftest <inUID> <outUID> --tone --add-late
 ```
 
-Ideas pendientes: presets de cadena completa, atajos de teclado globales para bypass, medidor de latencia total, soporte de plugins VST3 vía wrapper.
+Ideas on the list: English UI, whole-chain presets, global keyboard shortcuts for bypass, total latency readout, VST3 support through a wrapper.
 
-## Licencia
+## License
 
-[MIT](LICENSE). Spectrum no incluye ni distribuye ningún plugin; FabFilter, Pro‑Q y el resto de nombres citados son marcas de sus respectivos propietarios y se mencionan solo como ejemplo de uso.
+[MIT](LICENSE). Spectrum does not include or distribute any plugin. FabFilter, Pro‑Q, ADPTR MetricAB and the other names mentioned are trademarks of their respective owners and appear only as usage examples.
